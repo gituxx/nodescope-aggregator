@@ -21,12 +21,12 @@ This project uses Pages Direct Upload. Direct Upload is separate from the public
 
 ```sh
 npx wrangler login
-npx wrangler pages project create nodescope-aggregator --production-branch main
+npx wrangler pages project create nodescope-aggregator --production-branch main --force
 npm run build
 npm run deploy:cloudflare
 ```
 
-After the first deployment, open the Pages project **Custom domains** and add `node.oinnn.top`. Complete this Pages step before adding a DNS record. If `oinnn.top` is managed in the same Cloudflare account, Cloudflare can create the required DNS record. Never commit API keys or other credentials.
+The `--force` flag keeps first-time creation on Pages Direct Upload with current Wrangler versions. After the first deployment, open the Pages project **Custom domains** and add `node.oinnn.top` before creating its CNAME to `nodescope-aggregator.pages.dev`. Never commit API keys or other credentials.
 
 ## License
 
