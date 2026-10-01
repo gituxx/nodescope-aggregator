@@ -3,4 +3,11 @@ name = "nodescope-aggregator"
 pages_build_output_dir = "./dist"
 compatibility_date = "2026-10-01"
 
+[[kv_namespaces]]
+binding = "NODESCOPE_DATA"
+id = "6f1b134fa8ad450dbfdc261981c2ee4c"
+
 [env.production]
+[[env.production.kv_namespaces]]
+binding = "NODESCOPE_DATA"
+id = "6f1b134fa8ad450dbfdc261981c2ee4c"
