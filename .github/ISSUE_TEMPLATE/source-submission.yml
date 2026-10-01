@@ -1,0 +1,44 @@
+name: Submit a public node source
+description: Suggest a public GitHub repository, web subscription, RSS feed, or Telegram mirror for manual review.
+title: "[Source] "
+labels: ["source-submission", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Only submit public sources that you are allowed to share. Submissions are reviewed before collection and are not fetched automatically.
+  - type: input
+    id: source-url
+    attributes:
+      label: Public source URL
+      description: Use an HTTPS URL. Do not include tokens, private subscription links, or credentials.
+      placeholder: https://example.com/public-subscription
+    validations:
+      required: true
+  - type: dropdown
+    id: source-type
+    attributes:
+      label: Source type
+      options:
+        - GitHub repository or raw file
+        - Public web subscription
+        - RSS or Atom feed
+        - Public Telegram channel mirror
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Mention update frequency, output format, and why the source is suitable for public aggregation.
+      placeholder: Public URI list, refreshed every few hours.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Confirmation
+      options:
+        - label: This is a public source and the URL does not contain a private token or user-specific subscription key.
+          required: true

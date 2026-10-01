@@ -6,15 +6,17 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "dev:pages": "npm run build && wrangler pages dev ./dist",
-    "build": "vite build",
+    "build": "vite build && node scripts/generate-locales.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test",
-    "deploy:cloudflare": "wrangler pages deploy ./dist --project-name=nodescope-aggregator --branch=main"
+    "deploy:cloudflare": "wrangler pages deploy ./dist --project-name=nodescope-aggregator --branch=main",
+    "deploy:collector": "wrangler deploy --config wrangler.collector.toml"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
