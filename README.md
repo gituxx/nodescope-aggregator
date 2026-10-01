@@ -1,10 +1,18 @@
 # NodeScope
 
-NodeScope is a Chinese-language dashboard prototype for a public proxy-node aggregator. It includes an overview, sample node table, search and filters, latency and availability sorting, responsive layout, and a client-format subscription dialog.
+NodeScope is a Chinese-language dashboard for a public proxy-node catalog. The Pages Function synchronizes a public, third-party URI bundle on demand and caches the last snapshot for four hours.
 
 ## Current scope
 
-The dashboard uses clearly labeled sample data. It does not crawl public sources, run health checks, store nodes, or provide importable subscriptions. A production release needs a backend for source intake, protocol parsing, safe connection checks, deduplication, geographic lookup, and subscription serialization. The subscription address shown in the preview is not a live endpoint.
+The current feed combines [`morpheusadam/v2ray-config`'s `best` bundle](https://github.com/morpheusadam/v2ray-config) and [`yuesuizhengrong/proxy-node-collector`](https://github.com/yuesuizhengrong/proxy-node-collector)'s Base64 subscription. The source bundles are already aggregated and checked by their maintainers; NodeScope does not independently test endpoints. The parser accepts Shadowsocks, ShadowsocksR, VMess, VLESS, Trojan, Hysteria, Hysteria2, TUIC, and WireGuard URIs and removes duplicates.
+
+The public API is served by Cloudflare Pages Functions:
+
+- `GET /api/nodes` returns parsed node metadata without credentials.
+- `GET /api/stats` returns source and protocol counts.
+- `GET /api/subscription?format=base64` returns a Base64 URI subscription; `format=plain` returns raw URIs.
+
+The subscription endpoint contains credentials from the upstream public feed by design. Public proxy operators are third parties; do not send sensitive traffic through them. NodeScope does not yet perform its own availability checks or IP geolocation, so latency, online rate, and country are intentionally not presented as verified facts. The upstream bundle is refreshed daily; NodeScope checks it when the four-hour edge snapshot expires and a request arrives. If a refresh fails, the last cached snapshot may be served for up to seven days.
 
 ## Local development
 
@@ -13,7 +21,7 @@ npm install
 npm run dev
 ```
 
-Create a production build with `npm run build`.
+For local testing of Pages Functions, run `npm run dev:pages` and open the Wrangler URL (by default, `http://localhost:8788`). Run parser tests with `npm test`, and create a production build with `npm run build`.
 
 ## Deploy to Cloudflare Pages
 
