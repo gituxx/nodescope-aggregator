@@ -5,16 +5,17 @@ name: Verify nodes
 # pulls results/snapshot.json every hour.
 on:
   schedule:
-    - cron: "23 */3 * * *"
+    - cron: "23 */2 * * *"
   workflow_dispatch:
     inputs:
-      limit:
-        description: "Maximum candidates to test"
+      budget:
+        description: "Maximum nodes to test in this run"
         required: false
-        default: "40000"
+        default: "70000"
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: verify-nodes
@@ -23,7 +24,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    timeout-minutes: 150
     env:
       MIHOMO_VERSION: v1.19.33
     steps:
@@ -56,7 +57,13 @@ jobs:
       - name: Verify
         run: |
           ulimit -n 65535 || true
-          node scripts/verify.mjs --mihomo ./mihomo --out ./results --limit "${{ github.event.inputs.limit || '40000' }}"
+          node scripts/verify.mjs --mihomo ./mihomo --out ./results --budget "${{ github.event.inputs.budget || '70000' }}"
+
+      - name: Keep scheduled workflow enabled
+        # GitHub disables cron workflows after 60 days without repository activity.
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/verify.yml/enable" || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish results branch
         run: |
@@ -73,6 +80,7 @@ jobs:
 
           - `snapshot.json` – full snapshot consumed by the Cloudflare Worker
           - `nodes.txt` / `nodes.b64` – plain / Base64 subscription of all verified nodes
+          - `clash.yaml` – ready-to-import mihomo / Clash Meta profile (nodes re-tested in Clash form)
           - `stats.json` – run statistics and source health
           - `history.json` – rolling per-node pass/fail history used for stability scores
           EOF

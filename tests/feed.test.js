@@ -217,6 +217,13 @@ test("API prefers the proxy-verified snapshot and exposes the verified profile",
     assert.equal(verified.status, 200);
     assert.deepEqual((await verified.text()).trim().split("\n"), ["trojan://y@b.example:443#B", "vless://x@a.example:443#A"]);
 
+    const clashResponse = await onRequestGet({ request: new Request("https://node.oinnn.top/api/subscription?format=clash&profile=verified"), env });
+    assert.equal(clashResponse.headers.get("Content-Type"), "text/yaml; charset=utf-8");
+    assert.match(await clashResponse.text(), /proxies: \[\]|proxies:\n/);
+    const byId = await onRequestGet({ request: new Request(`https://node.oinnn.top/api/node?id=${data.nodes[0].id}`), env });
+    assert.equal(byId.status, 200);
+    assert.equal((await onRequestGet({ request: new Request("https://node.oinnn.top/api/node?id=missing"), env })).status, 404);
+
     // A TCP failure seen from Cloudflare must not downgrade a proxy-verified node.
     stored.set("probes:v1", JSON.stringify({ checks: { "a.example:443": { status: "failed", latencyMs: null, checkedAt: new Date().toISOString() } }, geo: {} }));
     const probed = await (await onRequestGet({ request: new Request("https://node.oinnn.top/api/nodes"), env })).json();

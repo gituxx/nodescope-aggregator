@@ -14,6 +14,8 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { collectCandidates } from "../lib/feed.js";
 import { buildVerifiedSnapshot, nodeKey, pruneHistory, setUriLabel, updateHistory } from "../lib/verify.js";
+import { uriToClash, buildClashConfig } from "../lib/clash.js";
+import { stringify as toYaml } from "yaml";
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, value, index, list) => {
   if (value.startsWith("--")) pairs.push([value.slice(2), list[index + 1]?.startsWith("--") ? "true" : list[index + 1]]);
@@ -22,14 +24,21 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, value, inde
 
 const MIHOMO = resolve(args.mihomo || "./mihomo");
 const OUT = resolve(args.out || "./results");
-const LIMIT = Number(args.limit || 40000);
+const LIMIT = Number(args.limit || 400000);
+// Per-run test budget. The full pool can exceed 300k nodes, so each run re-tests every known-good
+// node, then never-tested nodes, then the longest-untested failures.
+const BUDGET = Number(args.budget || 70000);
+const RECENT_GOOD_MS = 3 * 24 * 60 * 60 * 1000;
 const TEST_URL = args["test-url"] || "https://www.gstatic.com/generate_204";
 const TRACE_URL = "https://cloudflare.com/cdn-cgi/trace";
+const SPEED_URL = "https://speed.cloudflare.com/__down?bytes=1000000";
 const PHASE1_CHUNK = 3000;
 const PHASE1_CONCURRENCY = Number(args.concurrency || 160);
 const PHASE1_TIMEOUT_MS = 6000;
 const PHASE2_CHUNK = 300;
-const PHASE2_CONCURRENCY = 48;
+const PHASE2_CONCURRENCY = 64;
+const SPEED_CONCURRENCY = 16;
+const PREVIOUS_GUARD_MAX_AGE_MS = 8 * 60 * 60 * 1000;
 const MAX_LATENCY_MS = 4000;
 const CONTROLLER_PORT = 19190;
 const LISTENER_BASE_PORT = 30000;
@@ -163,6 +172,17 @@ function trace(port) {
   });
 }
 
+// Download 1 MB through the node; partial transfers still yield a throughput estimate.
+function speedTest(port) {
+  return new Promise((done) => {
+    execFile("curl", ["-s", "-o", "/dev/null", "-m", "10", "-x", `http://127.0.0.1:${port}`, "-w", "%{speed_download} %{size_download}", SPEED_URL],
+      { timeout: 12000 }, (_error, stdout) => {
+        const [bytesPerSecond, size] = String(stdout || "").trim().split(/\s+/).map(Number);
+        done(Number.isFinite(bytesPerSecond) && size >= 100000 ? Math.round((bytesPerSecond * 8) / 10000) / 100 : null);
+      });
+  });
+}
+
 async function phase1(candidates) {
   const delays = new Map();
   for (let start = 0; start < candidates.length; start += PHASE1_CHUNK) {
@@ -206,12 +226,93 @@ async function phase2(candidates, delays) {
           return;
         }
         const latencyMs = second ? Math.round((delays.get(index) + second) / 2) : delays.get(index);
-        results.set(index, { ok: true, latencyMs, exit });
+        results.set(index, { ok: true, latencyMs, exit, speedMbps: null });
+      });
+      // Throughput runs in its own pass with low concurrency so tests don't compete for bandwidth.
+      const passing = chunk.map((index, slot) => [index, slot]).filter(([index]) => results.get(index)?.ok);
+      await pool(passing, SPEED_CONCURRENCY, async ([index, slot]) => {
+        results.get(index).speedMbps = await speedTest(LISTENER_BASE_PORT + slot);
       });
     });
     log(`phase2 ${Math.min(start + PHASE2_CHUNK, alive.length)}/${alive.length} ok=${[...results.values()].filter((item) => item.ok).length}`);
   }
   return results;
+}
+
+// Phase 3: convert passing nodes to Clash/mihomo proxies and test the *converted* form, so the
+// published Clash profile only contains nodes proven to work in Clash clients.
+async function phase3(candidates, results) {
+  const entries = [];
+  for (const [index, result] of results) {
+    if (!result.ok) continue;
+    const clash = uriToClash(candidates[index].raw);
+    if (clash) entries.push({ index, clash });
+  }
+  let remaining = entries;
+  for (let start = 0; start < remaining.length; start += PHASE1_CHUNK) {
+    let chunk = remaining.slice(start, start + PHASE1_CHUNK);
+    for (let attempt = 0; attempt < 300 && chunk.length; attempt += 1) {
+      const dir = join(tmpdir(), `nodescope-p3-${process.pid}`);
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+      const config = {
+        "external-controller": `127.0.0.1:${CONTROLLER_PORT}`, "log-level": "error", ipv6: true, "unified-delay": true,
+        proxies: chunk.map(({ index, clash }) => ({ name: `c${index}`, ...clash })),
+        "proxy-groups": [{ name: "all", type: "select", proxies: chunk.map(({ index }) => `c${index}`) }],
+        rules: ["MATCH,DIRECT"],
+      };
+      writeFileSync(join(dir, "config.yaml"), toYaml(config, { lineWidth: 0, aliasDuplicateObjects: false }));
+      const check = await new Promise((done) => execFile(MIHOMO, ["-t", "-d", dir, "-f", join(dir, "config.yaml")], { timeout: 60000 },
+        (error, stdout, stderr) => done({ error, output: `${stdout}${stderr}` })));
+      const bad = check.output.match(/proxy (\d+)[: ]/);
+      if (check.error && bad) {
+        chunk.splice(Number(bad[1]), 1);
+        continue;
+      }
+      if (check.error) { log(`phase3 config rejected: ${check.output.slice(-300)}`); break; }
+      const child = spawn(MIHOMO, ["-d", dir, "-f", join(dir, "config.yaml")], { stdio: "ignore" });
+      const exited = new Promise((done) => child.on("exit", done));
+      try {
+        for (let waited = 0; waited < 60000; waited += 250) {
+          try { if ((await fetch(`http://127.0.0.1:${CONTROLLER_PORT}/version`)).ok) break; } catch { /* starting */ }
+          await sleep(250);
+        }
+        await pool(chunk, PHASE1_CONCURRENCY, async ({ index, clash }) => {
+          for (let tries = 0; tries < 2; tries += 1) {
+            try {
+              const response = await fetch(`http://127.0.0.1:${CONTROLLER_PORT}/proxies/c${index}/delay?timeout=8000&url=${encodeURIComponent(TEST_URL)}`,
+                { signal: AbortSignal.timeout(12000) });
+              if (response.ok) { results.get(index).clash = clash; return; }
+            } catch { /* retry */ }
+          }
+        });
+      } finally {
+        child.kill("SIGTERM");
+        await Promise.race([exited, sleep(5000)]);
+        if (child.exitCode === null) child.kill("SIGKILL");
+        rmSync(dir, { recursive: true, force: true });
+      }
+      break;
+    }
+  }
+  const ok = [...results.values()].filter((item) => item.clash).length;
+  log(`phase3 clash-converted=${entries.length} clash-verified=${ok}`);
+  return ok;
+}
+
+function planRun(nodes, history, budget, now = Date.now()) {
+  const good = [];
+  const fresh = [];
+  const failed = [];
+  nodes.forEach((node, index) => {
+    const entry = history[nodeKey(node.identity)];
+    if (!entry) fresh.push(index);
+    else if (entry.ok && now - Date.parse(entry.ok) < RECENT_GOOD_MS) good.push(index);
+    else failed.push([index, Date.parse(entry.t) || 0]);
+  });
+  failed.sort((a, b) => a[1] - b[1]);
+  const plan = [...good, ...fresh, ...failed.map(([index]) => index)].slice(0, budget);
+  return { plan, good: good.length, fresh: fresh.length, failed: failed.length };
 }
 
 async function main() {
@@ -227,12 +328,22 @@ async function main() {
   log(`candidates=${collected.nodes.length} sources=${collected.sources.length} failedSources=${failedSources.length}`);
   for (const source of failedSources) log(`  source error: ${source.name}: ${source.error}`);
 
+  const run = planRun(collected.nodes, history, BUDGET);
+  log(`plan: testing ${run.plan.length} (known-good ${run.good}, never-tested ${run.fresh}, failed ${run.failed})`);
+  // Test only the planned subset; indexes below refer to the subset.
+  const subset = run.plan.map((index) => collected.nodes[index]);
+  collected.totalCandidates = collected.nodes.length;
+  collected.nodes = subset;
   const delays = await phase1(collected.nodes);
   const results = await phase2(collected.nodes, delays);
+  const clashVerified = await phase3(collected.nodes, results);
   const passed = [...results.values()].filter((item) => item.ok).length;
   log(`passed=${passed} handshake=${delays.size} candidates=${collected.nodes.length}`);
 
-  const previousPassed = previous?.verification?.passed || 0;
+  // Compare with the previous run only while it is recent; otherwise a genuine long-term drop in
+  // upstream supply would block publishing forever.
+  const previousAge = Date.now() - Date.parse(previous?.verification?.generatedAt || 0);
+  const previousPassed = previousAge < PREVIOUS_GUARD_MAX_AGE_MS ? previous?.verification?.passed || 0 : 0;
   const minimum = Math.max(MIN_PUBLISH, Math.floor(previousPassed * MIN_RATIO_OF_PREVIOUS));
   if (passed < minimum) {
     // Most likely a runner network problem; keep the previous snapshot and history untouched.
@@ -249,10 +360,13 @@ async function main() {
   const stats = {
     runner: process.env.GITHUB_ACTIONS ? "github-actions" : "local",
     testUrl: TEST_URL,
-    candidates: collected.nodes.length,
+    candidates: collected.totalCandidates,
+    tested: collected.nodes.length,
     handshakeOk: delays.size,
     passed,
     traced: [...results.values()].filter((item) => item.ok && item.exit?.countryCode).length,
+    speedTested: [...results.values()].filter((item) => item.ok && item.speedMbps).length,
+    clashVerified,
     durationSec: Math.round((Date.now() - startedAt) / 1000),
   };
   const snapshot = buildVerifiedSnapshot({ collected, results, history, generatedAt, stats });
@@ -261,6 +375,7 @@ async function main() {
   const plain = `${snapshot.nodes.map((node) => node.raw).join("\n")}\n`;
   writeFileSync(join(OUT, "nodes.txt"), plain);
   writeFileSync(join(OUT, "nodes.b64"), Buffer.from(plain).toString("base64"));
+  writeFileSync(join(OUT, "clash.yaml"), buildClashConfig(snapshot.nodes));
   writeFileSync(join(OUT, "stats.json"), JSON.stringify({ ...snapshot.verification, sources: collected.sources }, null, 2));
   log(`published ${snapshot.nodes.length} nodes in ${stats.durationSec}s`);
 }

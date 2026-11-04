@@ -8,6 +8,21 @@ import {
   getFeedSnapshot,
 } from "../../lib/feed.js";
 import { mergeProbes, readProbes } from "../../lib/probe.js";
+import { buildClashConfig, uriToClash } from "../../lib/clash.js";
+
+const VERIFIED_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+
+// Stable node id: verifier-provided hash, otherwise FNV-1a of the URI (fallback snapshots).
+export function nodeId(node) {
+  if (node.id) return node.id;
+  let hash = 0x811c9dc5;
+  const text = node.raw || `${node.protocol}|${node.server}|${node.port}`;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `f${hash.toString(16).padStart(8, "0")}`;
+}
 
 const headers = {
   "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
@@ -100,12 +115,16 @@ export async function onRequestGet({ request, env }) {
   }
 
   if (route === "node") {
-    const value = url.searchParams.get("index");
-    const index = value && /^\d+$/.test(value) ? Number(value) : -1;
-    if (!Number.isInteger(index) || index < 0 || index >= snapshot.nodes.length || url.searchParams.get("version") !== snapshot.fetchedAt) {
-      return json({ error: "节点已更新，请刷新列表后重试" }, 409);
+    // Prefer the stable id so a page opened before a refresh can still copy nodes.
+    const id = url.searchParams.get("id");
+    let node = id ? snapshot.nodes.find((item) => nodeId(item) === id) : null;
+    if (!node && !id) {
+      const value = url.searchParams.get("index");
+      const index = value && /^\d+$/.test(value) ? Number(value) : -1;
+      if (index >= 0 && index < snapshot.nodes.length && url.searchParams.get("version") === snapshot.fetchedAt) node = snapshot.nodes[index];
     }
-    return new Response(snapshot.nodes[index].raw, {
+    if (!node) return json({ error: "节点已下线或已更新，请刷新列表后重试" }, id ? 404 : 409);
+    return new Response(node.raw, {
       headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" },
     });
   }
@@ -120,7 +139,9 @@ export async function onRequestGet({ request, env }) {
     upstreamGeneratedAt: snapshot.upstreamGeneratedAt,
     checkedAt: snapshot.checkedAt || null,
     verification: snapshot.verification || null,
-    stale: Boolean(snapshot.stale),
+    // A verified snapshot that has not been refreshed for hours is stale even if it loaded fine.
+    stale: Boolean(snapshot.stale) || Boolean(snapshot.verification
+      && Date.now() - Date.parse(snapshot.verification.generatedAt) > VERIFIED_STALE_AFTER_MS),
     refreshError: snapshot.refreshError || null,
     count: nodes.length,
     protocols,
@@ -134,16 +155,25 @@ export async function onRequestGet({ request, env }) {
   if (route === "nodes") {
     return json({
       ...metadata,
-      nodes: nodes.map(({ identity, raw, exitIp, ...node }, index) => ({ ...node, index })),
+      nodes: nodes.map(({ identity, raw, exitIp, clash, ...node }, index) => ({ ...node, id: nodeId({ ...node, raw }), index })),
     });
   }
   if (route === "stats") return json(metadata);
   if (route === "subscription") {
     const selected = filterSubscription(nodes, url);
     if (!selected) return json({ error: "订阅筛选无效；可用 all、best100、verified、apac、west 或 ISO 国家码，并可组合 protocol、region、country。" }, 400);
-    const lines = selected.map((node) => node.raw).join("\n") + (selected.length ? "\n" : "");
-    const format = url.searchParams.get("format") === "plain" ? "plain" : "base64";
-    const body = format === "plain" ? lines : encodeBase64(lines);
+    const requested = url.searchParams.get("format");
+    const format = requested === "plain" || requested === "clash" ? requested : "base64";
+    let body;
+    if (format === "clash") {
+      // Verified nodes carry a Clash object proven in Clash; others are converted on the fly.
+      const clashNodes = selected.map((node) => ({ ...node, clash: node.clash || (node.verifiedAt ? null : uriToClash(node.raw)) }))
+        .filter((node) => node.clash);
+      body = buildClashConfig(clashNodes);
+    } else {
+      const lines = selected.map((node) => node.raw).join("\n") + (selected.length ? "\n" : "");
+      body = format === "plain" ? lines : encodeBase64(lines);
+    }
     const profile = [
       url.searchParams.get("profile") || "all",
       url.searchParams.get("region"),
@@ -154,8 +184,11 @@ export async function onRequestGet({ request, env }) {
     return new Response(body, {
       headers: {
         ...headers,
-        "Content-Type": "text/plain; charset=utf-8",
-        "Content-Disposition": `inline; filename="nodescope-${profile}.${format === "plain" ? "txt" : "b64"}"`,
+        "Content-Type": format === "clash" ? "text/yaml; charset=utf-8" : "text/plain; charset=utf-8",
+        "Content-Disposition": `inline; filename="nodescope-${profile}.${format === "plain" ? "txt" : format === "clash" ? "yaml" : "b64"}"`,
+        // Lets Clash / v2rayN-style clients show the profile name and auto-update interval.
+        "Profile-Update-Interval": "2",
+        "Subscription-Userinfo": "upload=0; download=0; total=0; expire=0",
         "X-NodeScope-Profile": profile,
         "X-NodeScope-Count": String(selected.length),
       },
