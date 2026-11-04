@@ -28,6 +28,18 @@ The scheduled Cloudflare Worker refreshes feeds every four hours and probes up t
 
 New source suggestions are submitted through GitHub Issues and reviewed before being configured. User-submitted URLs are **not fetched automatically**.
 
+## Real proxy verification
+
+`.github/workflows/verify.yml` runs every 3 hours on GitHub Actions:
+
+1. Collects **all** sources in `lib/feed.js` (up to 40,000 de-duplicated candidates; duplicates are detected by a canonical identity that ignores labels and parameter order, and private/placeholder endpoints are dropped).
+2. Tests every candidate through [mihomo](https://github.com/MetaCubeX/mihomo): full protocol handshake + HTTP request to `generate_204` (≤ 4 s).
+3. Survivors fetch Cloudflare `/cdn-cgi/trace` *through the node* — a second confirmation plus the real **exit IP and exit country**.
+4. A rolling 16-run pass/fail history gives each node a stability score; nodes are ranked by stability, latency, exit trace and source count.
+5. Only passing nodes are published to the `results` branch (`snapshot.json`, `nodes.txt`, `nodes.b64`, `stats.json`). A run that passes fewer than 30% of the previous run is treated as a runner network problem and not published.
+
+The collector Worker pulls `results/snapshot.json` hourly; if it is unavailable or older than 12 hours it falls back to its own lighter collector. Latency is measured from a GitHub (US/EU) runner, not from your location. `profile=verified` returns only proxy-verified nodes.
+
 ## Understanding the data
 
 - `reachable`: Cloudflare established a TCP connection to the node's entry host and port. This does not test a proxy handshake, authentication, routing, or exit.

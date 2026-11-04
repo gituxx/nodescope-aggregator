@@ -27,6 +27,18 @@ Cloudflare Worker 每 4 小时刷新来源，每 2 分钟最多探测 20 个唯�
 
 新增来源通过 GitHub Issue 人工审核，用户提交的 URL 不会自动抓取。
 
+## 真实代理实测
+
+`.github/workflows/verify.yml` 每 3 小时在 GitHub Actions 运行：
+
+1. 采集 `lib/feed.js` 中**全部**来源（最多 40,000 个去重候选；按忽略名称和参数顺序的规范身份去重，并丢弃私网/占位凭据节点）。
+2. 通过 [mihomo](https://github.com/MetaCubeX/mihomo) 对每个候选做完整协议握手 + HTTP 请求 `generate_204`（≤ 4 秒）。
+3. 存活节点再**经由节点本身**访问 Cloudflare `/cdn-cgi/trace`，二次确认并获取真实**出口 IP 与出口国家**。
+4. 保留最近 16 次结果计算稳定性评分；按稳定性、延迟、出口检测与来源数排序。
+5. 仅将通过的节点发布到 `results` 分支（`snapshot.json`、`nodes.txt`、`nodes.b64`、`stats.json`）。若通过数低于上次的 30%，视为运行器网络异常，不发布。
+
+采集 Worker 每小时拉取 `results/snapshot.json`；不可用或超过 12 小时则回退到自身的轻量采集。延迟从 GitHub（美/欧）运行器测得，不代表你所在网络。`profile=verified` 仅返回代理实测通过的节点。
+
 ## 状态与地区说明
 
 - `reachable`：Cloudflare 到节点入口主机和端口的 TCP 连接成功。它不测试代理握手、认证、路由或出口。

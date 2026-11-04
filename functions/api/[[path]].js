@@ -1,4 +1,7 @@
 import {
+  AMERICAS,
+  ASIA_PACIFIC,
+  EUROPE,
   getCountryCounts,
   getProtocolCounts,
   getStatusCounts,
@@ -11,9 +14,6 @@ const headers = {
   "X-Content-Type-Options": "nosniff",
 };
 
-const ASIA_PACIFIC = new Set(["AU", "BD", "BN", "CN", "FJ", "HK", "ID", "IN", "JP", "KH", "KR", "LA", "LK", "MM", "MN", "MO", "MY", "NP", "NZ", "PH", "PK", "SG", "TH", "TW", "VN"]);
-const EUROPE = new Set(["AD", "AL", "AT", "BA", "BE", "BG", "BY", "CH", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GB", "GE", "GR", "HR", "HU", "IE", "IS", "IT", "LI", "LT", "LU", "LV", "MC", "MD", "ME", "MK", "MT", "NL", "NO", "PL", "PT", "RO", "RS", "RU", "SE", "SI", "SK", "SM", "UA", "VA"]);
-const AMERICAS = new Set(["AR", "BO", "BR", "CA", "CL", "CO", "CR", "CU", "DO", "EC", "GT", "HN", "JM", "MX", "PA", "PE", "PR", "PY", "SV", "TT", "US", "UY", "VE"]);
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -39,10 +39,10 @@ export function filterSubscription(nodes, url) {
   const protocols = [...values("protocol"), ...values("protocols")];
   const selectedRegion = (params.get("region") || "all").toLowerCase();
   const countryCodes = new Set(nodes.map((node) => node.countryCode).filter(Boolean));
-  const knownProtocols = new Map(nodes.map((node) => [node.protocol.toLowerCase(), node.protocol]));
+  const knownProtocols = new Map(nodes.filter((node) => typeof node.protocol === "string" && node.protocol).map((node) => [node.protocol.toLowerCase(), node.protocol]));
   const selectedProtocols = protocols.map((value) => knownProtocols.get(value.toLowerCase()));
   const profileCountry = /^[a-z]{2}$/.test(profile) ? profile.toUpperCase() : "";
-  const validProfiles = new Set(["all", "best100", "apac", "west"]);
+  const validProfiles = new Set(["all", "best100", "verified", "apac", "west"]);
 
   if ((!validProfiles.has(profile) && !countryCodes.has(profileCountry))
     || (countries.some((country) => !countryCodes.has(country)))
@@ -60,15 +60,30 @@ export function filterSubscription(nodes, url) {
   if (countries.length) selected = selected.filter((node) => countries.includes(node.countryCode));
   if (selectedProtocols.length) selected = selected.filter((node) => selectedProtocols.includes(node.protocol));
 
-  if (profile === "best100") {
+  if (profile === "verified") selected = selected.filter((node) => node.verifiedAt && node.status === "available");
+  if (profile === "best100" || profile === "verified") {
     const order = { available: 0, reachable: 1, upstream: 2 };
     const rank = (node) => node.benchmarkStatus === "available" ? 0 : order[node.status] ?? 3;
+    const latency = (node) => node.benchmarkLatencyMs ?? node.latencyMs ?? Number.MAX_SAFE_INTEGER;
     selected = [...selected]
       .filter((node) => node.status !== "failed" && (node.benchmarkStatus === "available" || node.status in order))
       .sort((a, b) => rank(a) - rank(b)
-        || ((a.benchmarkLatencyMs ?? a.latencyMs ?? Number.MAX_SAFE_INTEGER) - (b.benchmarkLatencyMs ?? b.latencyMs ?? Number.MAX_SAFE_INTEGER))
-        || a.name.localeCompare(b.name, "zh-CN"))
-      .slice(0, 100);
+        || (b.score ?? -1) - (a.score ?? -1)
+        || latency(a) - latency(b)
+        || String(a.name).localeCompare(String(b.name), "zh-CN"));
+    if (profile === "best100") {
+      // Spread the top list across countries so one region cannot monopolise it.
+      const perCountry = new Map();
+      const picked = [];
+      const overflow = [];
+      for (const node of selected) {
+        const key = node.countryCode || "??";
+        const count = perCountry.get(key) || 0;
+        if (count < 25) { perCountry.set(key, count + 1); picked.push(node); } else overflow.push(node);
+        if (picked.length >= 100) break;
+      }
+      selected = [...picked, ...overflow].slice(0, 100);
+    }
   }
   return selected;
 }
@@ -104,6 +119,7 @@ export async function onRequestGet({ request, env }) {
     fetchedAt: snapshot.fetchedAt,
     upstreamGeneratedAt: snapshot.upstreamGeneratedAt,
     checkedAt: snapshot.checkedAt || null,
+    verification: snapshot.verification || null,
     stale: Boolean(snapshot.stale),
     refreshError: snapshot.refreshError || null,
     count: nodes.length,
@@ -118,13 +134,13 @@ export async function onRequestGet({ request, env }) {
   if (route === "nodes") {
     return json({
       ...metadata,
-      nodes: nodes.map(({ identity, raw, ...node }, index) => ({ ...node, index })),
+      nodes: nodes.map(({ identity, raw, exitIp, ...node }, index) => ({ ...node, index })),
     });
   }
   if (route === "stats") return json(metadata);
   if (route === "subscription") {
     const selected = filterSubscription(nodes, url);
-    if (!selected) return json({ error: "订阅筛选无效；可用 all、best100、apac、west 或 ISO 国家码，并可组合 protocol、region、country。" }, 400);
+    if (!selected) return json({ error: "订阅筛选无效；可用 all、best100、verified、apac、west 或 ISO 国家码，并可组合 protocol、region、country。" }, 400);
     const lines = selected.map((node) => node.raw).join("\n") + (selected.length ? "\n" : "");
     const format = url.searchParams.get("format") === "plain" ? "plain" : "base64";
     const body = format === "plain" ? lines : encodeBase64(lines);
