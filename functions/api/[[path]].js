@@ -166,8 +166,9 @@ export async function onRequestGet({ request, env }) {
     const format = requested === "plain" || requested === "clash" ? requested : "base64";
     let body;
     if (format === "clash") {
-      // Verified nodes carry a Clash object proven in Clash; others are converted on the fly.
-      const clashNodes = selected.map((node) => ({ ...node, clash: node.clash || (node.verifiedAt ? null : uriToClash(node.raw)) }))
+      // `clash` object = proven in Clash; `null` = failed the Clash re-test; absent = never
+      // tested in Clash form (older/fallback snapshots), so convert on the fly.
+      const clashNodes = selected.map((node) => ({ ...node, clash: node.clash !== undefined ? node.clash : uriToClash(node.raw) }))
         .filter((node) => node.clash);
       body = buildClashConfig(clashNodes);
     } else {
