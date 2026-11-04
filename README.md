@@ -35,7 +35,7 @@ New source suggestions are submitted through GitHub Issues and reviewed before b
 1. Collects **all** sources in `lib/feed.js` (up to 40,000 de-duplicated candidates; duplicates are detected by a canonical identity that ignores labels and parameter order, and private/placeholder endpoints are dropped).
 2. Tests every candidate through [mihomo](https://github.com/MetaCubeX/mihomo): full protocol handshake + HTTP request to `generate_204` (≤ 4 s).
 3. Survivors fetch Cloudflare `/cdn-cgi/trace` *through the node* — a second confirmation plus the real **exit IP and exit country**.
-4. A rolling 16-run pass/fail history gives each node a stability score; nodes are ranked by stability (50), latency (25), 1 MB download throughput (15), exit trace (5) and source count (5); at most 3 nodes per exit IP are kept.
+4. A rolling 16-run pass/fail history gives each node a stability score; nodes are ranked by stability (50), latency (25), 1 MB download throughput (15), exit trace (5) and source count (5); at most 8 nodes per exit IP are kept.
 5. Only passing nodes are published to the `results` branch (`snapshot.json`, `nodes.txt`, `nodes.b64`, `stats.json`). A run that passes fewer than 30% of the previous run is treated as a runner network problem and not published.
 
 The collector Worker pulls `results/snapshot.json` hourly; if it is unavailable or older than 12 hours it falls back to its own lighter collector. Latency is measured from a GitHub (US/EU) runner, not from your location. `profile=verified` returns only proxy-verified nodes.

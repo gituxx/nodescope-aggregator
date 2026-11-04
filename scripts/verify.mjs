@@ -248,51 +248,59 @@ async function phase3(candidates, results) {
     const clash = uriToClash(candidates[index].raw);
     if (clash) entries.push({ index, clash });
   }
-  let remaining = entries;
-  for (let start = 0; start < remaining.length; start += PHASE1_CHUNK) {
-    let chunk = remaining.slice(start, start + PHASE1_CHUNK);
-    for (let attempt = 0; attempt < 300 && chunk.length; attempt += 1) {
-      const dir = join(tmpdir(), `nodescope-p3-${process.pid}`);
-      rmSync(dir, { recursive: true, force: true });
-      mkdirSync(dir, { recursive: true });
-      const config = {
-        "external-controller": `127.0.0.1:${CONTROLLER_PORT}`, "log-level": "error", ipv6: true, "unified-delay": true,
-        proxies: chunk.map(({ index, clash }) => ({ name: `c${index}`, ...clash })),
-        "proxy-groups": [{ name: "all", type: "select", proxies: chunk.map(({ index }) => `c${index}`) }],
-        rules: ["MATCH,DIRECT"],
-      };
-      writeFileSync(join(dir, "config.yaml"), toYaml(config, { lineWidth: 0, aliasDuplicateObjects: false }));
-      const check = await new Promise((done) => execFile(MIHOMO, ["-t", "-d", dir, "-f", join(dir, "config.yaml")], { timeout: 60000 },
-        (error, stdout, stderr) => done({ error, output: `${stdout}${stderr}` })));
+  // Work queue of chunks; a chunk rejected for an unidentifiable reason is split in half.
+  const queue = [];
+  for (let start = 0; start < entries.length; start += PHASE1_CHUNK) queue.push(entries.slice(start, start + PHASE1_CHUNK));
+  let restarts = 0;
+  while (queue.length && restarts < 400) {
+    const chunk = queue.shift();
+    if (!chunk.length) continue;
+    restarts += 1;
+    const dir = join(tmpdir(), `nodescope-p3-${process.pid}`);
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    const config = {
+      "external-controller": `127.0.0.1:${CONTROLLER_PORT}`, "log-level": "error", ipv6: true, "unified-delay": true,
+      proxies: chunk.map(({ index, clash }) => ({ name: `c${index}`, ...clash })),
+      "proxy-groups": [{ name: "all", type: "select", proxies: chunk.map(({ index }) => `c${index}`) }],
+      rules: ["MATCH,DIRECT"],
+    };
+    writeFileSync(join(dir, "config.yaml"), toYaml(config, { lineWidth: 0, aliasDuplicateObjects: false }));
+    const check = await new Promise((done) => execFile(MIHOMO, ["-t", "-d", dir, "-f", join(dir, "config.yaml")], { timeout: 60000 },
+      (error, stdout, stderr) => done({ error, output: `${stdout}${stderr}` })));
+    if (check.error) {
       const bad = check.output.match(/proxy (\d+)[: ]/);
-      if (check.error && bad) {
+      if (bad) {
         chunk.splice(Number(bad[1]), 1);
-        continue;
+        queue.unshift(chunk);
+      } else if (chunk.length > 1) {
+        log(`phase3 split chunk of ${chunk.length}: ${check.output.slice(-160).trim()}`);
+        queue.unshift(chunk.slice(0, chunk.length / 2), chunk.slice(chunk.length / 2));
       }
-      if (check.error) { log(`phase3 config rejected: ${check.output.slice(-300)}`); break; }
-      const child = spawn(MIHOMO, ["-d", dir, "-f", join(dir, "config.yaml")], { stdio: "ignore" });
-      const exited = new Promise((done) => child.on("exit", done));
-      try {
-        for (let waited = 0; waited < 60000; waited += 250) {
-          try { if ((await fetch(`http://127.0.0.1:${CONTROLLER_PORT}/version`)).ok) break; } catch { /* starting */ }
-          await sleep(250);
+      rmSync(dir, { recursive: true, force: true });
+      continue;
+    }
+    const child = spawn(MIHOMO, ["-d", dir, "-f", join(dir, "config.yaml")], { stdio: "ignore" });
+    const exited = new Promise((done) => child.on("exit", done));
+    try {
+      for (let waited = 0; waited < 60000; waited += 250) {
+        try { if ((await fetch(`http://127.0.0.1:${CONTROLLER_PORT}/version`)).ok) break; } catch { /* starting */ }
+        await sleep(250);
+      }
+      await pool(chunk, PHASE1_CONCURRENCY, async ({ index, clash }) => {
+        for (let tries = 0; tries < 2; tries += 1) {
+          try {
+            const response = await fetch(`http://127.0.0.1:${CONTROLLER_PORT}/proxies/c${index}/delay?timeout=8000&url=${encodeURIComponent(TEST_URL)}`,
+              { signal: AbortSignal.timeout(12000) });
+            if (response.ok) { results.get(index).clash = clash; return; }
+          } catch { /* retry */ }
         }
-        await pool(chunk, PHASE1_CONCURRENCY, async ({ index, clash }) => {
-          for (let tries = 0; tries < 2; tries += 1) {
-            try {
-              const response = await fetch(`http://127.0.0.1:${CONTROLLER_PORT}/proxies/c${index}/delay?timeout=8000&url=${encodeURIComponent(TEST_URL)}`,
-                { signal: AbortSignal.timeout(12000) });
-              if (response.ok) { results.get(index).clash = clash; return; }
-            } catch { /* retry */ }
-          }
-        });
-      } finally {
-        child.kill("SIGTERM");
-        await Promise.race([exited, sleep(5000)]);
-        if (child.exitCode === null) child.kill("SIGKILL");
-        rmSync(dir, { recursive: true, force: true });
-      }
-      break;
+      });
+    } finally {
+      child.kill("SIGTERM");
+      await Promise.race([exited, sleep(5000)]);
+      if (child.exitCode === null) child.kill("SIGKILL");
+      rmSync(dir, { recursive: true, force: true });
     }
   }
   const ok = [...results.values()].filter((item) => item.clash).length;
