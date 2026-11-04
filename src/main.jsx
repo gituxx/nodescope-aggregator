@@ -71,7 +71,7 @@ function App() {
   const [pageSize, setPageSize] = useState(25);
   const [modal, setModal] = useState(false);
   const [format, setFormat] = useState('base64');
-  const [subscriptionProfile, setSubscriptionProfile] = useState('all');
+  const [subscriptionProfile, setSubscriptionProfile] = useState('best100');
   const [subscriptionCountries, setSubscriptionCountries] = useState([]);
   const [subscriptionCountryChoice, setSubscriptionCountryChoice] = useState('');
   const [subscriptionRegion, setSubscriptionRegion] = useState('all');
@@ -207,7 +207,8 @@ function App() {
   async function copyNode(node) {
     setCopyingNode(node.index);
     try {
-      const response = await fetch(`/api/node?index=${node.index}&version=${encodeURIComponent(feed.fetchedAt)}`, { cache: 'no-store' });
+      const query = node.id ? `id=${encodeURIComponent(node.id)}` : `index=${node.index}&version=${encodeURIComponent(feed.fetchedAt)}`;
+      const response = await fetch(`/api/node?${query}`, { cache: 'no-store' });
       if (!response.ok) throw new Error((await response.json()).error || t('nodeUnavailable'));
       await navigator.clipboard.writeText(await response.text());
       notify(t('nodeCopied'));
@@ -233,7 +234,7 @@ function App() {
       <div className={`source-state ${feed?.sources?.some((source) => !source.error) ? 'source-connected' : ''}`}><span className="source-dot" />{t('sources')}<span className="source-tag">{loading ? t('syncing') : feed?.sources?.some((source) => !source.error) ? `${feed.sources.filter((source) => !source.error).length}` : t('unavailable')}</span></div>
       <a className="nav-item" href="https://github.com/gituxx/nodescope-aggregator/issues/new?title=%5BSource%5D%20&body=Public%20source%20URL%3A%20%0ASource%20type%3A%20%0AUpdate%20frequency%3A%20%0AConfirm%20this%20is%20public%20and%20has%20no%20private%20tokens%3A%20" target="_blank" rel="noreferrer"><ArrowUpRight size={17} />{t('submitSource')}</a>
       <div className="sidebar-bottom">
-        <div className="refresh-note"><Clock3 size={15} /><span>{t('syncCycle')}</span><strong>{t('everyFourHours')}</strong></div>
+        <div className="refresh-note"><Clock3 size={15} /><span>{t('syncCycle')}</span><strong>{feed?.verification ? `${t('everyFourHours')} · ${formatDate(feed.verification.generatedAt, locale, t)}` : t('everyFourHours')}</strong></div>
         <button className="nav-item" onClick={() => notify(t('publicSourceDisclaimer'))}><CircleHelp size={17} />{t('dataInfo')}</button>
       </div>
     </>
@@ -268,7 +269,7 @@ function App() {
           <section className="metrics-grid" aria-label={t('nodesTitle')}>
             <Metric label={t('metricPublic')} value={loading ? '—' : count} unit={locale === 'zh-CN' ? '个' : ''} icon={<Wifi size={17} />} accent="mint" title={t('publicData')} />
             <Metric label={t('metricProtocols')} value={loading ? '—' : protocols.length} unit={locale === 'zh-CN' ? '种' : ''} icon={<Radio size={17} />} accent="blue" title={t('basedOnSnapshot')} />
-            <Metric label={t('metricReachable')} value={loading ? '—' : feed?.statuses?.reachable || 0} unit={locale === 'zh-CN' ? '个' : ''} icon={<Activity size={17} />} accent="amber" title={t('probeWarning')} />
+            <Metric label={feed?.verification ? t('metricVerified') : t('metricReachable')} value={loading ? '—' : (feed?.verification ? feed?.statuses?.available : feed?.statuses?.reachable) || 0} unit={locale === 'zh-CN' ? '个' : ''} icon={<Activity size={17} />} accent="amber" title={feed?.verification ? `${t('verifiedAt')} ${formatDate(feed.verification.generatedAt, locale, t)}` : t('probeWarning')} />
             <Metric label={t('metricLocated')} value={loading ? '—' : feed?.identifiedCount || 0} unit={locale === 'zh-CN' ? '个' : ''} icon={<Globe2 size={17} />} accent="coral" title={t('locationsIdentified', { count: feed?.identifiedCount || 0 })} />
           </section>
 
@@ -339,7 +340,7 @@ function App() {
             return <span className="selected-country" key={code}>{countryName}<button title={t('removeCountry', { country: countryName })} aria-label={t('removeCountry', { country: countryName })} onClick={() => setSubscriptionCountries((items) => items.filter((item) => item !== code))}><X size={12} /></button></span>;
           })}</div>}
           <label className="modal-label">{t('encoding')}</label>
-          <div className="format-toggle"><button className={format === 'base64' ? 'selected' : ''} onClick={() => setFormat('base64')}>{t('base64')}</button><button className={format === 'plain' ? 'selected' : ''} onClick={() => setFormat('plain')}>{t('plain')}</button></div>
+          <div className="format-toggle"><button className={format === 'base64' ? 'selected' : ''} onClick={() => setFormat('base64')}>{t('base64')}</button><button className={format === 'plain' ? 'selected' : ''} onClick={() => setFormat('plain')}>{t('plain')}</button><button className={format === 'clash' ? 'selected' : ''} onClick={() => setFormat('clash')}>Clash / mihomo</button></div>
           <label className="modal-label" htmlFor="sub-url">{t('subscriptionAddress')}</label>
           <div className="subscription-url"><input id="sub-url" readOnly value={subscriptionUrl} /><button onClick={copySubscription} title={t('copyLink')}>{copied ? <Check size={16} /> : <Copy size={16} />}</button></div>
           <div className="modal-footnote"><CircleHelp size={15} />{t('filterHelp')}</div>
@@ -366,7 +367,8 @@ function NodeRow({ node, locale, t, onCopy, copying }) {
   const locationText = localizedLocationSource(node.locationSource, t) || t('nodeUnknownLocation');
   const countryName = node.countryCode ? getLocalizedCountryName(node.countryCode, locale) : '';
   const stabilityText = node.verifiedAt && Number.isFinite(node.stability) ? ` · ${t('stability')} ${Math.round(node.stability * 100)}% (${node.observations || 1})` : '';
-  const checkedTitle = node.checkedAt ? `${statusText}${stabilityText} · ${formatDate(node.checkedAt, locale, t)}${node.probeDetail ? ` · ${node.probeDetail}` : ''}` : t('nodeUnverified');
+  const speedText = node.verifiedAt && Number.isFinite(node.speedMbps) ? ` · ${node.speedMbps} Mbps` : '';
+  const checkedTitle = node.checkedAt ? `${statusText}${stabilityText}${speedText} · ${formatDate(node.checkedAt, locale, t)}${node.probeDetail ? ` · ${node.probeDetail}` : ''}` : t('nodeUnverified');
   return <tr>
     <td><div className="node-name-cell"><span className="node-type-icon"><Radio size={15} /></span><div><strong>{node.name}</strong><small>{node.protocol} · {node.port}</small></div></div></td>
     <td><span className={`protocol-pill ${node.protocol.toLowerCase().replaceAll(' ', '-')}`}>{node.protocol}</span></td>

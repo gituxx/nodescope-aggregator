@@ -61,3 +61,32 @@ test("verified snapshot keeps only passing nodes, uses exit country and sorts by
   assert.equal(parseNodeUri(snapshot.nodes[0].raw).name, snapshot.nodes[0].name);
   assert.equal(snapshot.verification.published, 2);
 });
+
+test("snapshot keeps at most three nodes per exit IP and rewards throughput", () => {
+  const nodes = Array.from({ length: 5 }, (_, i) => parseNodeUri(`vless://id${i}@cdn${i}.example:443#n`))
+    .map((node) => ({ ...node, source: "s", method: "m", sourcesCount: 1 }));
+  const results = new Map(nodes.map((_, i) => [i, { ok: true, latencyMs: 200, exit: { countryCode: "DE", ip: "5.5.5.5" }, speedMbps: i }]));
+  const snapshot = buildVerifiedSnapshot({ collected: { nodes, sources: [] }, results, history: {}, generatedAt: new Date().toISOString(), stats: {} });
+  assert.equal(snapshot.nodes.length, 3);
+  assert.equal(snapshot.verification.exitDuplicatesRemoved, 2);
+  assert.equal(snapshot.nodes[0].speedMbps, 4);
+  assert.ok(scoreNode({ stability: 0.8, latencyMs: 300, speedMbps: 40 }) > scoreNode({ stability: 0.8, latencyMs: 300, speedMbps: 0.5 }));
+});
+
+test("uriToClash converts the common URI families into mihomo proxies", async () => {
+  const { uriToClash, buildClashConfig } = await import("../lib/clash.js");
+  const vmess = `vmess://${Buffer.from(JSON.stringify({ add: "vm.example", port: "443", id: "u", aid: "0", net: "ws", path: "/p", host: "h.example", tls: "tls", sni: "s.example" })).toString("base64")}`;
+  assert.deepEqual(uriToClash(vmess), { type: "vmess", server: "vm.example", port: 443, uuid: "u", alterId: 0, cipher: "auto", udp: true, tls: true, servername: "s.example", network: "ws", "ws-opts": { path: "/p", headers: { Host: "h.example" } } });
+  const reality = uriToClash("vless://id@r.example:443?security=reality&pbk=KEY&sid=ab&sni=www.apple.com&fp=chrome&type=grpc&serviceName=svc&flow=");
+  assert.equal(reality["reality-opts"]["public-key"], "KEY");
+  assert.equal(reality["grpc-opts"]["grpc-service-name"], "svc");
+  assert.equal(uriToClash("vless://id@r.example:443?security=reality&type=tcp"), null);
+  const ss = uriToClash(`ss://${Buffer.from("aes-256-gcm:pw").toString("base64")}@ss.example:8388#x`);
+  assert.deepEqual([ss.cipher, ss.password, ss.port], ["aes-256-gcm", "pw", 8388]);
+  const hy2 = uriToClash("hysteria2://pw@hy.example:443?sni=a.com&obfs=salamander&obfs-password=o&insecure=1");
+  assert.deepEqual([hy2.type, hy2.obfs, hy2["skip-cert-verify"]], ["hysteria2", "salamander", true]);
+  const yaml = buildClashConfig([{ name: "A", clash: ss }, { name: "A", clash: hy2 }]);
+  assert.match(yaml, /name: "A #2"/);
+  assert.doesNotMatch(yaml, /&a1|\*a1/);
+  assert.match(yaml, /MATCH,🚀 节点选择 Proxy/);
+});
