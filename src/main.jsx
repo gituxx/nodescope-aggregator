@@ -13,6 +13,7 @@ const SUBSCRIPTION_BASE = '/api/subscription';
 const SUBSCRIPTION_PROFILES = [
   { value: 'all', key: 'profileAll' },
   { value: 'best100', key: 'profileBest' },
+  { value: 'verified', key: 'profileVerified' },
   { value: 'apac', key: 'profileApac' },
   { value: 'west', key: 'profileWest' },
 ];
@@ -364,7 +365,8 @@ function NodeRow({ node, locale, t, onCopy, copying }) {
             : node.status === 'unknown' ? t('statusUnknown') : t('nodeUnverified');
   const locationText = localizedLocationSource(node.locationSource, t) || t('nodeUnknownLocation');
   const countryName = node.countryCode ? getLocalizedCountryName(node.countryCode, locale) : '';
-  const checkedTitle = node.checkedAt ? `${statusText} · ${formatDate(node.checkedAt, locale, t)}${node.probeDetail ? ` · ${node.probeDetail}` : ''}` : t('nodeUnverified');
+  const stabilityText = node.verifiedAt && Number.isFinite(node.stability) ? ` · ${t('stability')} ${Math.round(node.stability * 100)}% (${node.observations || 1})` : '';
+  const checkedTitle = node.checkedAt ? `${statusText}${stabilityText} · ${formatDate(node.checkedAt, locale, t)}${node.probeDetail ? ` · ${node.probeDetail}` : ''}` : t('nodeUnverified');
   return <tr>
     <td><div className="node-name-cell"><span className="node-type-icon"><Radio size={15} /></span><div><strong>{node.name}</strong><small>{node.protocol} · {node.port}</small></div></div></td>
     <td><span className={`protocol-pill ${node.protocol.toLowerCase().replaceAll(' ', '-')}`}>{node.protocol}</span></td>

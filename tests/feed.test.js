@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FEED_SOURCES, parseFeed, parseNodeUri, getCountryName, getProtocolCounts } from "../lib/feed.js";
+import { WORKER_FEED_SOURCES, parseFeed, parseNodeUri, getCountryName, getProtocolCounts } from "../lib/feed.js";
 import { filterSubscription, onRequestGet } from "../functions/api/[[path]].js";
 
 test("parses common public node URI formats without exposing credentials in metadata", () => {
@@ -51,7 +51,7 @@ test("deduplicates parsed entries and computes protocol counts", () => {
 });
 
 test("decodes a Base64-encoded subscription bundle", () => {
-  const raw = "vless://uuid@edge.example:443#edge\nvmess://eyJhZGQiOiJ2bWVzcy5leGFtcGxlIiwicG9ydCI6IjQ0MyJ9#v2\n";
+  const raw = `vless://uuid@edge.example:443#edge\nvmess://${Buffer.from(JSON.stringify({ add: "vmess.example", port: "443", id: "a1" })).toString("base64")}#v2\n`;
   const encoded = Buffer.from(raw).toString("base64");
   const snapshot = parseFeed(encoded);
 
@@ -101,7 +101,7 @@ test("API returns sanitized metadata and a usable Base64 subscription", async ()
   const vmess = Buffer.from(JSON.stringify({ add: "vmess.example", port: "443", id: "vmess-secret" })).toString("base64");
   const feeds = new Map([
     ["best.txt", "# generated 2026-10-01T00:00:00Z\ntrojan://secret@relay.example:443#relay\nvless://uuid@edge.example:443#edge\n"],
-    ["subscription.txt", Buffer.from(`vmess://${vmess}#v2\n`).toString("base64")],
+    ["/v.txt", Buffer.from(`vmess://${vmess}#v2\n`).toString("base64")],
   ]);
   globalThis.fetch = async (input) => {
     const url = String(input);
@@ -120,7 +120,8 @@ test("API returns sanitized metadata and a usable Base64 subscription", async ()
     const data = await nodesResponse.json();
     assert.equal(nodesResponse.status, 200);
     assert.equal(data.count, 3);
-    assert.equal(data.sources.length, FEED_SOURCES.length + 1);
+    assert.equal(data.sources.length, WORKER_FEED_SOURCES.length + 1);
+    assert.equal(data.verification, null);
     assert.equal(data.protocols.some((item) => item.protocol === "VMess"), true);
     assert.equal(data.nodes.some((node) => "raw" in node || "identity" in node), false);
     assert.equal(data.nodes.every((node) => Number.isInteger(node.index)), true);
@@ -181,4 +182,46 @@ test("best100 retains protocol benchmark priority and excludes unverified filler
   ];
   const selected = filterSubscription(nodes, new URL("https://node.oinnn.top/api/subscription?profile=best100"));
   assert.deepEqual(selected.map((node) => node.name), ["protocol tested", "fast TCP", "selected upstream"]);
+});
+
+test("API prefers the proxy-verified snapshot and exposes the verified profile", async () => {
+  const originalFetch = globalThis.fetch;
+  const stored = new Map();
+  const env = { NODESCOPE_DATA: {
+    get: async (key, type) => type === "json" ? JSON.parse(stored.get(key) || "null") : stored.get(key),
+    put: async (key, value) => { stored.set(key, value); },
+  } };
+  const generatedAt = new Date().toISOString();
+  const snapshot = {
+    sources: [{ name: "s", url: "https://example.com", count: 2 }],
+    verification: { generatedAt, passed: 2 },
+    nodes: [
+      { name: "A", protocol: "VLESS", server: "a.example", port: 443, raw: "vless://x@a.example:443#A", status: "available", latencyMs: 300, verifiedAt: generatedAt, countryCode: "JP", score: 70, exitIp: "1.1.1.1" },
+      { name: "B", protocol: "Trojan", server: "b.example", port: 443, raw: "trojan://y@b.example:443#B", status: "available", latencyMs: 100, verifiedAt: generatedAt, countryCode: "US", score: 90 },
+    ],
+  };
+  let feedFetches = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/snapshot.json")) return Response.json(snapshot);
+    feedFetches += 1;
+    return new Response("not found", { status: 404 });
+  };
+  try {
+    const data = await (await onRequestGet({ request: new Request("https://node.oinnn.top/api/nodes"), env })).json();
+    assert.equal(feedFetches, 0);
+    assert.equal(data.count, 2);
+    assert.equal(data.verification.passed, 2);
+    assert.equal(data.nodes.some((node) => "exitIp" in node), false);
+    const verified = await onRequestGet({ request: new Request("https://node.oinnn.top/api/subscription?format=plain&profile=verified"), env });
+    assert.equal(verified.status, 200);
+    assert.deepEqual((await verified.text()).trim().split("\n"), ["trojan://y@b.example:443#B", "vless://x@a.example:443#A"]);
+
+    // A TCP failure seen from Cloudflare must not downgrade a proxy-verified node.
+    stored.set("probes:v1", JSON.stringify({ checks: { "a.example:443": { status: "failed", latencyMs: null, checkedAt: new Date().toISOString() } }, geo: {} }));
+    const probed = await (await onRequestGet({ request: new Request("https://node.oinnn.top/api/nodes"), env })).json();
+    assert.equal(probed.nodes.find((node) => node.server === "a.example").status, "available");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

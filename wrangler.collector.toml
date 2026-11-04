@@ -7,4 +7,4 @@ binding = "NODESCOPE_DATA"
 id = "6f1b134fa8ad450dbfdc261981c2ee4c"
 
 [triggers]
-crons = ["0 */4 * * *", "*/2 * * * *"]
+crons = ["7 * * * *", "*/2 * * * *"]
