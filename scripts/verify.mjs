@@ -54,52 +54,94 @@ function readJson(path, fallback) {
   try { return JSON.parse(readFileSync(path, "utf8")); } catch { return fallback; }
 }
 
-async function withMihomo(name, config, providerLines, task) {
+async function startMihomo(name, config, segments) {
   const dir = join(tmpdir(), `nodescope-${name}-${process.pid}`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "provider.txt"), providerLines.join("\n"));
+  segments.forEach((lines, index) => writeFileSync(join(dir, `p${index}.txt`), lines.join("\n")));
   writeFileSync(join(dir, "config.yaml"), config);
   const child = spawn(MIHOMO, ["-d", dir, "-f", join(dir, "config.yaml")], { stdio: ["ignore", "ignore", "pipe"] });
-  let stderr = "";
-  child.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-4000); });
+  let output = "";
+  child.stderr.on("data", (chunk) => { output = (output + chunk).slice(-8000); });
   const exited = new Promise((done) => child.on("exit", done));
-  try {
-    const started = Date.now();
-    while (true) {
-      try {
-        const response = await fetch(`http://127.0.0.1:${CONTROLLER_PORT}/providers/proxies/p`, { signal: AbortSignal.timeout(2000) });
-        if (response.ok) {
-          const provider = await response.json();
-          return await task(new Set((provider.proxies || []).map((proxy) => proxy.name)));
-        }
-      } catch { /* not ready yet */ }
-      if (child.exitCode !== null || Date.now() - started > 60000) throw new Error(`mihomo failed to start: ${stderr}`);
-      await sleep(300);
-    }
-  } finally {
+  const stop = async () => {
     child.kill("SIGTERM");
     await Promise.race([exited, sleep(5000)]);
     if (child.exitCode === null) child.kill("SIGKILL");
+    await Promise.race([exited, sleep(2000)]);
     rmSync(dir, { recursive: true, force: true });
+  };
+  const started = Date.now();
+  while (true) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${CONTROLLER_PORT}/providers/proxies`, { signal: AbortSignal.timeout(5000) });
+      if (response.ok) {
+        const { providers = {} } = await response.json();
+        const counts = segments.map((_, index) => providers[`p${index}`]?.proxies?.length || 0);
+        const owner = new Map();
+        for (const [providerName, provider] of Object.entries(providers)) {
+          if (!/^p\d+$/.test(providerName)) continue;
+          for (const proxy of provider.proxies || []) owner.set(proxy.name, providerName);
+        }
+        return { stop, counts, owner };
+      }
+    } catch { /* not ready yet */ }
+    if (child.exitCode !== null || Date.now() - started > 90000) {
+      await stop();
+      throw new Error(`mihomo failed to start: ${output}`);
+    }
+    await sleep(250);
   }
 }
 
-const baseConfig = `external-controller: 127.0.0.1:${CONTROLLER_PORT}
-log-level: silent
+// mihomo rejects a whole provider when one proxy in it is invalid. Lines are spread over many
+// small providers; any provider that loads nothing is halved and retried until the bad line is
+// isolated and dropped. `task` receives Map(proxyName -> providerName).
+async function withMihomo(name, buildConfig, lines, task, segmentSize = 50) {
+  let segments = [];
+  for (let index = 0; index < lines.length; index += segmentSize) segments.push(lines.slice(index, index + segmentSize));
+  for (let round = 0; round < 12; round += 1) {
+    const instance = await startMihomo(name, buildConfig(segments.map((_, index) => `p${index}`)), segments);
+    const failed = instance.counts.map((count, index) => count === 0 && segments[index].length > 0);
+    if (!failed.some(Boolean) || round === 11) {
+      try {
+        return await task(instance.owner);
+      } finally {
+        await instance.stop();
+      }
+    }
+    await instance.stop();
+    const next = [];
+    segments.forEach((segment, index) => {
+      if (!failed[index]) next.push(segment);
+      else if (segment.length > 1) {
+        const middle = Math.ceil(segment.length / 2);
+        next.push(segment.slice(0, middle), segment.slice(middle));
+      }
+    });
+    segments = next;
+  }
+  return task(new Map());
+}
+
+function buildConfig(providers, extra) {
+  const providerYaml = providers.map((providerName) => `  ${providerName}: { type: file, path: ./${providerName}.txt, health-check: { enable: false } }`).join("\n");
+  return `external-controller: 127.0.0.1:${CONTROLLER_PORT}
+log-level: error
 ipv6: true
 unified-delay: true
 tcp-concurrent: true
 proxy-providers:
-  p:
-    type: file
-    path: ./provider.txt
-    health-check: { enable: false }
+${providerYaml}
+${extra(providers)}
+rules:
+  - MATCH,DIRECT
 `;
+}
 
-async function healthcheck(name, timeout = PHASE1_TIMEOUT_MS) {
+async function healthcheck(provider, name, timeout = PHASE1_TIMEOUT_MS) {
   try {
-    const url = `http://127.0.0.1:${CONTROLLER_PORT}/providers/proxies/p/${encodeURIComponent(name)}/healthcheck`
+    const url = `http://127.0.0.1:${CONTROLLER_PORT}/providers/proxies/${provider}/${encodeURIComponent(name)}/healthcheck`
       + `?timeout=${timeout}&url=${encodeURIComponent(TEST_URL)}`;
     const response = await fetch(url, { signal: AbortSignal.timeout(timeout + 4000) });
     if (!response.ok) return null;
@@ -130,10 +172,10 @@ async function phase1(candidates) {
       const tagged = setUriLabel(node.raw, `n${start + offset}`);
       if (tagged) lines.push(tagged);
     }
-    const config = `${baseConfig}proxy-groups:\n  - { name: all, type: select, use: [p] }\nrules:\n  - MATCH,DIRECT\n`;
+    const config = (providers) => buildConfig(providers, (names) => `proxy-groups:\n  - { name: all, type: select, use: [${names.join(", ")}] }`);
     await withMihomo("p1", config, lines, async (loaded) => {
-      await pool([...loaded], PHASE1_CONCURRENCY, async (name) => {
-        const delay = await healthcheck(name);
+      await pool([...loaded], PHASE1_CONCURRENCY, async ([name, provider]) => {
+        const delay = await healthcheck(provider, name);
         if (delay) delays.set(Number(name.slice(1)), delay);
       });
       log(`phase1 ${Math.min(start + PHASE1_CHUNK, candidates.length)}/${candidates.length} loaded=${loaded.size} alive=${delays.size}`);
@@ -148,15 +190,17 @@ async function phase2(candidates, delays) {
   for (let start = 0; start < alive.length; start += PHASE2_CHUNK) {
     const chunk = alive.slice(start, start + PHASE2_CHUNK);
     const lines = chunk.map((index) => setUriLabel(candidates[index].raw, `n${index}`));
-    const groups = chunk.map((index, slot) => `  - { name: g${slot}, type: select, use: [p], filter: "^n${index}$" }`).join("\n");
     const listeners = chunk.map((_, slot) => `  - { name: l${slot}, type: mixed, listen: 127.0.0.1, port: ${LISTENER_BASE_PORT + slot}, proxy: g${slot} }`).join("\n");
-    const config = `${baseConfig}proxy-groups:\n${groups}\nlisteners:\n${listeners}\nrules:\n  - MATCH,DIRECT\n`;
+    const config = (providers) => buildConfig(providers, (names) => {
+      const groups = chunk.map((index, slot) => `  - { name: g${slot}, type: select, use: [${names.join(", ")}], filter: "^n${index}$" }`).join("\n");
+      return `proxy-groups:\n${groups}\nlisteners:\n${listeners}`;
+    });
     await withMihomo("p2", config, lines, async (loaded) => {
       await pool(chunk.map((index, slot) => [index, slot]), PHASE2_CONCURRENCY, async ([index, slot]) => {
         if (!loaded.has(`n${index}`)) return;
         let exit = await trace(LISTENER_BASE_PORT + slot);
         // A failed trace gets one more chance via a second URL test before the node is dropped.
-        const second = exit ? null : await healthcheck(`n${index}`, 8000);
+        const second = exit ? null : await healthcheck(loaded.get(`n${index}`), `n${index}`, 8000);
         if (!exit && !second) {
           results.set(index, { ok: false });
           return;

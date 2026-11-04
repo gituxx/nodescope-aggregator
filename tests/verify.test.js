@@ -24,6 +24,7 @@ test("canonical identity collapses re-shared nodes with reordered or empty param
   assert.equal(a.identity, b.identity);
   assert.equal(parseNodeUri("vless://00000000-0000-0000-0000-000000000000@edge.example:443"), null);
   assert.equal(parseNodeUri("trojan://pw@127.0.0.1:443"), null);
+  assert.equal(parseNodeUri("vless://id@edge.example:443?security=reality&amp;pbk=k&amp;sni=a.com").raw, "vless://id@edge.example:443?security=reality&pbk=k&sni=a.com");
   assert.equal(parseNodeUri("trojan://pw@192.168.1.4:443"), null);
 });
 
