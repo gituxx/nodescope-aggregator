@@ -7,6 +7,7 @@ import {
   Sparkles, Wifi, X
 } from 'lucide-react';
 import { LOCALES, getLocaleFromPath, getLocalePath, getLocalizedCountryName, translate } from './i18n.js';
+import { filterSubscription } from '../lib/subscription.js';
 import './style.css';
 
 const SUBSCRIPTION_BASE = '/api/subscription';
@@ -70,12 +71,14 @@ function App() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [modal, setModal] = useState(false);
-  const [format, setFormat] = useState('base64');
-  const [subscriptionProfile, setSubscriptionProfile] = useState('best100');
-  const [subscriptionCountries, setSubscriptionCountries] = useState([]);
-  const [subscriptionCountryChoice, setSubscriptionCountryChoice] = useState('');
-  const [subscriptionRegion, setSubscriptionRegion] = useState('all');
-  const [subscriptionProtocols, setSubscriptionProtocols] = useState([]);
+  const savedSubscription = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('nodescope:subscription') || '{}') || {}; } catch { return {}; }
+  }, []);
+  const [format, setFormat] = useState(savedSubscription.format || 'base64');
+  const [subscriptionProfile, setSubscriptionProfile] = useState(savedSubscription.profile || 'best100');
+  const [subscriptionCountries, setSubscriptionCountries] = useState(Array.isArray(savedSubscription.countries) ? savedSubscription.countries : []);
+  const [subscriptionRegion, setSubscriptionRegion] = useState(savedSubscription.region || 'all');
+  const [subscriptionProtocols, setSubscriptionProtocols] = useState(Array.isArray(savedSubscription.protocols) ? savedSubscription.protocols : []);
   const [copyingNode, setCopyingNode] = useState(null);
   const [showAllSources, setShowAllSources] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -177,10 +180,40 @@ function App() {
     return `${window.location.origin}${SUBSCRIPTION_BASE}?${params}`;
   }, [format, subscriptionCountries, subscriptionProfile, subscriptionProtocols, subscriptionRegion]);
 
-  function addSubscriptionCountry() {
-    if (!subscriptionCountryChoice || subscriptionCountries.includes(subscriptionCountryChoice)) return;
-    setSubscriptionCountries((items) => [...items, subscriptionCountryChoice]);
-    setSubscriptionCountryChoice('');
+  useEffect(() => {
+    try {
+      localStorage.setItem('nodescope:subscription', JSON.stringify({ format, profile: subscriptionProfile, region: subscriptionRegion, protocols: subscriptionProtocols, countries: subscriptionCountries }));
+    } catch { /* storage unavailable */ }
+  }, [format, subscriptionCountries, subscriptionProfile, subscriptionProtocols, subscriptionRegion]);
+
+  // Drop saved selections that no longer exist in the current snapshot, otherwise the API answers 400.
+  useEffect(() => {
+    if (!feed) return;
+    const countryCodes = new Set((feed.countries || []).map((item) => item.countryCode));
+    const protocolNames = new Set(protocols);
+    setSubscriptionCountries((items) => items.filter((code) => countryCodes.has(code)));
+    setSubscriptionProtocols((items) => items.filter((item) => protocolNames.has(item)));
+  }, [feed, protocols]);
+
+  // Live preview using the same filter as the API (nodes here lack only the raw URI).
+  const subscriptionMatches = useMemo(() => {
+    if (!feed?.nodes) return undefined;
+    const result = filterSubscription(feed.nodes, new URL(subscriptionUrl));
+    if (!result) return null;
+    if (format !== 'clash') return result.length;
+    return result.filter((node) => node.clash !== null).length;
+  }, [feed, subscriptionUrl, format]);
+
+  function addSubscriptionCountry(code) {
+    if (!code) return;
+    setSubscriptionCountries((items) => items.includes(code) ? items : [...items, code]);
+  }
+
+  function resetSubscription() {
+    setSubscriptionProfile('best100');
+    setSubscriptionRegion('all');
+    setSubscriptionProtocols([]);
+    setSubscriptionCountries([]);
   }
 
   function toggleSubscriptionProtocol(value) {
@@ -200,6 +233,9 @@ function App() {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
+      const input = document.getElementById('sub-url');
+      input?.focus();
+      input?.select();
       notify(t('copyBlocked'));
     }
   }
@@ -333,7 +369,7 @@ function App() {
           <label className="modal-label">{t('protocolsMulti')}</label>
           <div className="subscription-protocols">{protocols.map((item) => <label className="subscription-check" key={item}><input type="checkbox" checked={subscriptionProtocols.includes(item)} onChange={() => toggleSubscriptionProtocol(item)} /><span>{item}</span></label>)}</div>
           <label className="modal-label" htmlFor="subscription-country">{t('countriesMulti')}</label>
-          <div className="country-picker"><select id="subscription-country" className="country-subscription-select" value={subscriptionCountryChoice} onChange={(event) => setSubscriptionCountryChoice(event.target.value)}><option value="">{t('chooseCountry')}</option>{(feed?.countries || []).filter((item) => !subscriptionCountries.includes(item.countryCode)).map((item) => <option key={item.countryCode} value={item.countryCode}>{getLocalizedCountryName(item.countryCode, locale)} · {item.countryCode} ({item.count})</option>)}</select><button className="button button-secondary" disabled={!subscriptionCountryChoice} onClick={addSubscriptionCountry}>{t('add')}</button></div>
+          <select id="subscription-country" className="country-subscription-select" value="" onChange={(event) => addSubscriptionCountry(event.target.value)}><option value="">{(feed?.countries || []).every((item) => subscriptionCountries.includes(item.countryCode)) && feed?.countries?.length ? t('allCountriesSelected') : t('chooseCountry')}</option>{(feed?.countries || []).filter((item) => !subscriptionCountries.includes(item.countryCode)).map((item) => <option key={item.countryCode} value={item.countryCode}>{getLocalizedCountryName(item.countryCode, locale)} · {item.countryCode} ({item.count})</option>)}</select>
           {subscriptionCountries.length > 0 && <div className="selected-countries">{subscriptionCountries.map((code) => {
             const country = feed?.countries?.find((item) => item.countryCode === code);
             const countryName = country ? getLocalizedCountryName(code, locale) : code;
@@ -341,8 +377,12 @@ function App() {
           })}</div>}
           <label className="modal-label">{t('encoding')}</label>
           <div className="format-toggle"><button className={format === 'base64' ? 'selected' : ''} onClick={() => setFormat('base64')}>{t('base64')}</button><button className={format === 'plain' ? 'selected' : ''} onClick={() => setFormat('plain')}>{t('plain')}</button><button className={format === 'clash' ? 'selected' : ''} onClick={() => setFormat('clash')}>Clash / mihomo</button></div>
+          <div className={`subscription-match ${subscriptionMatches === 0 || subscriptionMatches === null ? 'subscription-match-empty' : ''}`} role="status" aria-live="polite">
+            <span>{subscriptionMatches === undefined ? t('loading') : subscriptionMatches === null ? t('invalidSubscription') : subscriptionMatches === 0 ? t('noSubscriptionMatches') : t('matchCount', { count: subscriptionMatches })}</span>
+            <button type="button" onClick={resetSubscription}>{t('resetFilters')}</button>
+          </div>
           <label className="modal-label" htmlFor="sub-url">{t('subscriptionAddress')}</label>
-          <div className="subscription-url"><input id="sub-url" readOnly value={subscriptionUrl} /><button onClick={copySubscription} title={t('copyLink')}>{copied ? <Check size={16} /> : <Copy size={16} />}</button></div>
+          <div className="subscription-url"><input id="sub-url" readOnly value={subscriptionUrl} onFocus={(event) => event.target.select()} /><button onClick={copySubscription} title={t('copyLink')}>{copied ? <Check size={16} /> : <Copy size={16} />}</button></div>
           <div className="modal-footnote"><CircleHelp size={15} />{t('filterHelp')}</div>
           <div className="modal-actions"><a className="button button-secondary" href={subscriptionUrl} target="_blank" rel="noreferrer"><Download size={15} />{t('openSubscription')}</a><button className="button button-primary" onClick={copySubscription}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? t('copied') : t('copyLink')}</button></div>
         </section>
