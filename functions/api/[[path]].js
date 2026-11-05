@@ -6,7 +6,7 @@ import {
 } from "../../lib/feed.js";
 import { mergeProbes, readProbes } from "../../lib/probe.js";
 import { buildClashConfig, uriToClash } from "../../lib/clash.js";
-import { filterSubscription } from "../../lib/subscription.js";
+import { filterSubscription, subscriptionTitle } from "../../lib/subscription.js";
 
 export { filterSubscription };
 
@@ -127,11 +127,17 @@ export async function onRequestGet({ request, env }) {
       ...url.searchParams.getAll("protocols"),
       ...url.searchParams.getAll("country"),
     ].filter(Boolean).join("-").toLowerCase().replace(/[^a-z0-9,-]/g, "").slice(0, 80);
+    const title = (url.searchParams.get("name") || subscriptionTitle(url.searchParams)).slice(0, 120);
+    const extension = format === "plain" ? "txt" : format === "clash" ? "yaml" : "b64";
+    if (format === "clash") body = body.replace(/^# NodeScope[^\n]*/, `# ${title.replace(/[\r\n]/g, " ")} · ${count} nodes · https://node.oinnn.top/`);
     return new Response(body, {
       headers: {
         ...headers,
         "Content-Type": format === "clash" ? "text/yaml; charset=utf-8" : "text/plain; charset=utf-8",
-        "Content-Disposition": `inline; filename="nodescope-${profile}.${format === "plain" ? "txt" : format === "clash" ? "yaml" : "b64"}"`,
+        // ASCII fallback plus RFC 5987 UTF-8 name (Clash Verge / mihomo-party use the filename).
+        "Content-Disposition": `inline; filename="nodescope-${profile}.${extension}"; filename*=UTF-8''${encodeURIComponent(title)}.${extension}`,
+        // Hiddify, v2rayNG, Streisand, Clash Verge Rev, sing-box clients read this as the profile name.
+        "Profile-Title": `base64:${encodeBase64(title)}`,
         // Lets Clash / v2rayN-style clients show the profile name and auto-update interval.
         "Profile-Update-Interval": "2",
         "Subscription-Userinfo": "upload=0; download=0; total=0; expire=0",

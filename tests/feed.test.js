@@ -232,3 +232,9 @@ test("API prefers the proxy-verified snapshot and exposes the verified profile",
     globalThis.fetch = originalFetch;
   }
 });
+
+test("subscriptionTitle describes profile, countries and protocols", async () => {
+  const { subscriptionTitle } = await import("../lib/subscription.js");
+  assert.equal(subscriptionTitle(new URLSearchParams("profile=verified&country=JP&protocol=VLESS")), "NodeScope · 实测可用 · 日本 · VLESS");
+  assert.equal(subscriptionTitle(new URLSearchParams("profile=best100&format=clash"), "en"), "NodeScope · Top 100 · Clash");
+});

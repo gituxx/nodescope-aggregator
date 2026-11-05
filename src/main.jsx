@@ -7,7 +7,7 @@ import {
   Sparkles, Wifi, X
 } from 'lucide-react';
 import { LOCALES, getLocaleFromPath, getLocalePath, getLocalizedCountryName, translate } from './i18n.js';
-import { filterSubscription } from '../lib/subscription.js';
+import { filterSubscription, subscriptionTitle } from '../lib/subscription.js';
 import './style.css';
 
 const SUBSCRIPTION_BASE = '/api/subscription';
@@ -177,7 +177,9 @@ function App() {
     if (subscriptionRegion !== 'all') params.set('region', subscriptionRegion);
     for (const item of subscriptionProtocols) params.append('protocol', item);
     for (const item of subscriptionCountries) params.append('country', item);
-    return `${window.location.origin}${SUBSCRIPTION_BASE}?${params}`;
+    // Fragment = remark for v2rayN / Shadowrocket / NekoBox style clients; never sent to the server.
+    const title = subscriptionTitle(params, locale === 'zh-CN' ? 'zh-CN' : 'en');
+    return `${window.location.origin}${SUBSCRIPTION_BASE}?${params}#${encodeURIComponent(title)}`;
   }, [format, subscriptionCountries, subscriptionProfile, subscriptionProtocols, subscriptionRegion]);
 
   useEffect(() => {
