@@ -129,7 +129,7 @@ export async function onRequestGet({ request, env }) {
     ].filter(Boolean).join("-").toLowerCase().replace(/[^a-z0-9,-]/g, "").slice(0, 80);
     const title = (url.searchParams.get("name") || subscriptionTitle(url.searchParams)).slice(0, 120);
     const extension = format === "plain" ? "txt" : format === "clash" ? "yaml" : "b64";
-    if (format === "clash") body = body.replace(/^# NodeScope[^\n]*/, `# ${title.replace(/[\r\n]/g, " ")} · ${count} nodes · https://node.oinnn.top/`);
+    if (format === "clash") body = body.replace(/^# NodeScope[^\n]*/, `# ${title.replace(/[\r\n]/g, " ")} · ${count} nodes · ${url.origin}/`);
     return new Response(body, {
       headers: {
         ...headers,
