@@ -1,9 +1,12 @@
 # AGENTS.md — NodeScope AI 入口指南
 
-> **最后核对日期**：2026-11-18（Asia/Singapore）
-> **登录与 API 凭据**：所有账号、API Key、Token 均存放在本机 `CREDENTIALS.local.md`（权限 `600`，已 gitignore，严禁提交或外泄）。
+## AI-Workspace 入口
 
----
+- 项目 ID 为 `node`。先读本仓库的 [README.md](README.md)。项目背景和架构见 [项目说明](docs/项目说明.md) 与 [技术交接](docs/AGENT-HANDOFF.md)。运维命令和旧交接按当前任务范围查阅，文档中的历史本机路径按当前检出位置解释。
+- 从当前 Git 仓库或 worktree 往上找 `control/projects.yaml`。若 worktree 在工作区外，再从 `git worktree list --porcelain` 的第一条 `worktree` 路径（主仓库）往上找。只有注册表中该项目的 `repo` 路径与主仓库吻合时，才采用该工作区。
+- 找到工作区后，读取根目录 `AGENTS.md` 和 `README.md`，以及注册表指向的本项目 `coordination/README.md` 和 `tasks.yaml`。主仓库与各 worktree 使用同一份共享记录。
+- 单独克隆时，用本仓库内的文档和任务来源开展协作。若任务依赖共享记录，请要求提供对应的工作区或任务内容。
+- `CREDENTIALS.local.md` 是主仓库里的本机私有文件，需要时从授权渠道取得，避免写入日志、交接或提交。
 
 ## 1. 30 秒速览
 
@@ -14,7 +17,7 @@
   - Pages 默认域名：<https://nodescope-aggregator.pages.dev/>
   - Collector Worker 健康检查：<https://nodescope-collector.github-972.workers.dev/health>
 - **代码在哪**：
-  - 本机 Git 仓库根目录：`/Users/bb/codex/node/repo`（外层工作区目录为 `/Users/bb/codex/node`，所有 `git` / `npm` / `wrangler` 命令均在 `/Users/bb/codex/node/repo` 下执行）
+  - 本机 Git 仓库根目录：当前项目 Git 根目录（外层工作区目录为 工作区中的 `projects/node/`，所有 `git` / `npm` / `wrangler` 命令均在 当前项目 Git 根目录 下执行）
   - GitHub 远程仓库：<https://github.com/gituxx/nodescope-aggregator>
   - 分支：`main`（源码分支，与线上 Pages 部署完全同步）· `results`（GitHub Actions 发布的实测快照单提交数据分支）
 - **当前最大的问题（接手必看）**：
@@ -61,10 +64,10 @@
 
 ---
 
-## 4. 最常用命令（均在 `/Users/bb/codex/node/repo` 下执行）
+## 4. 最常用命令（均在 当前项目 Git 根目录 下执行）
 
 ```bash
-cd /Users/bb/codex/node/repo
+cd "$(git rev-parse --show-toplevel)"
 
 # 1. 运行全部单元测试（20 项）
 npm test
@@ -97,7 +100,7 @@ curl -s https://nodescope-collector.github-972.workers.dev/health | python3 -m j
 
 ## 5. 文档导航
 
-- **AI 详细技术交接文档**：[`docs/AGENT-HANDOFF.md`](file:///Users/bb/codex/node/repo/docs/AGENT-HANDOFF.md)（架构、状态表、代码地图、定时任务、共用资源边界、操作手册、从零重建、踩坑记录、待决事项）
-- **非技术版项目说明**：[`docs/项目说明.md`](file:///Users/bb/codex/node/repo/docs/项目说明.md)（功能说明、工作原理、外部服务、费用与到期日汇总表、风险说明）
-- **本地机密凭据文件**：[`CREDENTIALS.local.md`](file:///Users/bb/codex/node/repo/CREDENTIALS.local.md)（所有登录信息、API Key、Token、权限范围与轮换步骤，**已加入 `.gitignore`**）
-- **变更日志**：[`CHANGELOG.md`](file:///Users/bb/codex/node/repo/CHANGELOG.md)
+- **AI 详细技术交接文档**：[`docs/AGENT-HANDOFF.md`](docs/AGENT-HANDOFF.md)（架构、状态表、代码地图、定时任务、共用资源边界、操作手册、从零重建、踩坑记录、待决事项）
+- **非技术版项目说明**：[`docs/项目说明.md`](docs/项目说明.md)（功能说明、工作原理、外部服务、费用与到期日汇总表、风险说明）
+- **本地机密凭据文件**：[`CREDENTIALS.local.md`](CREDENTIALS.local.md)（所有登录信息、API Key、Token、权限范围与轮换步骤，**已加入 `.gitignore`**）
+- **变更日志**：[`CHANGELOG.md`](CHANGELOG.md)

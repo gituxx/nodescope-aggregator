@@ -48,8 +48,8 @@
 ## 2. 源代码与版本核实
 
 - **本机目录结构**：
-  - 外层工作区目录：`/Users/bb/codex/node`
-  - **Git 仓库根目录（主工程目录）**：`/Users/bb/codex/node/repo`（含 `.git/`、`package.json`、`wrangler.toml` 等，所有开发与部署命令均在此目录运行）
+  - 外层工作区目录：`/Users/bb/AI-Workspace/projects/node`
+  - **Git 仓库根目录（主工程目录）**：`/Users/bb/AI-Workspace/projects/node/repo`（含 `.git/`、`package.json`、`wrangler.toml` 等，所有开发与部署命令均在此目录运行）
 - **Git 远程仓库**：`https://github.com/gituxx/nodescope-aggregator.git`
 - **分支清单**：
   1. `main`：主源码分支。核对时无未提交代码改动，本次交接仅新增/更新交接文档与 `.gitignore` 并同步推送至 `origin/main`。
@@ -171,7 +171,7 @@ flowchart TD
 
 ## 5. 代码地图
 
-> 所有相对路径均以 `/Users/bb/codex/node/repo` 为基准。
+> 所有相对路径均以 `/Users/bb/AI-Workspace/projects/node/repo` 为基准。
 
 | 文件路径 | 行数 | 职责 | 关键函数 / 常量 / DOM ID | 修改时容易出错的地方（必看） |
 | --- | --- | --- | --- | --- |
@@ -207,7 +207,7 @@ flowchart TD
 
 ### 6.2 本地启动步骤
 ```bash
-cd /Users/bb/codex/node/repo
+cd /Users/bb/AI-Workspace/projects/node/repo
 
 # 1. 安装依赖（已安装，仅在 package.json 变更时执行）
 npm install
@@ -238,7 +238,7 @@ npm run build && npx wrangler pages dev ./dist --port 8788
 
 | 资源类别 | 名称 / 标识 | 用途 | 如何检查是否正常 | 坏了怎么修 |
 | --- | --- | --- | --- | --- |
-| **Cloudflare Pages** | `nodescope-aggregator`<br>（`nodescope-aggregator.pages.dev`） | 托管静态多语言网页与 `/api/*` Pages Functions | `curl -s -o /dev/null -w "%{http_code}\n" https://nodescope-aggregator.pages.dev/api/stats`（应返回 `200`） | 在 `/Users/bb/codex/node/repo` 执行 `npm run build` 后带凭据运行 `npm run deploy:cloudflare`；若最新提交有问题，在 Cloudflare Pages 控制台或 API Rollback 到上一版部署 ID `d236b022-e1fd-4896-8440-cae26a5e0601` |
+| **Cloudflare Pages** | `nodescope-aggregator`<br>（`nodescope-aggregator.pages.dev`） | 托管静态多语言网页与 `/api/*` Pages Functions | `curl -s -o /dev/null -w "%{http_code}\n" https://nodescope-aggregator.pages.dev/api/stats`（应返回 `200`） | 在 `/Users/bb/AI-Workspace/projects/node/repo` 执行 `npm run build` 后带凭据运行 `npm run deploy:cloudflare`；若最新提交有问题，在 Cloudflare Pages 控制台或 API Rollback 到上一版部署 ID `d236b022-e1fd-4896-8440-cae26a5e0601` |
 | **生产自定义域名 1** | `node.oinnn.top`<br>（Zone ID: `65c7c0f9329b39ca83f0dcd9ee3a351e`） | 主站生产域名（CNAME → `nodescope-aggregator.pages.dev`，`proxied: false`） | `curl -s https://node.oinnn.top/api/stats \| head -c 120` | 检查 `oinnn.top` 的 DNS CNAME 记录是否存在，以及 Pages 项目 `domains` 列表中 `node.oinnn.top` 状态是否为 `active`（见第 11 节 API 命令） |
 | **生产自定义域名 2** | `node.winv.cc`<br>（Zone ID: `6c67b3a052599b68364dacc7db6b389c`） | 主站生产域名（CNAME → `nodescope-aggregator.pages.dev`，`proxied: true`） | `curl -s https://node.winv.cc/api/stats \| head -c 120` | 检查 `winv.cc` 的 DNS CNAME 记录与 Pages 项目 `domains` 状态 |
 | **Cloudflare Worker** | `nodescope-collector`<br>（`nodescope-collector.github-972.workers.dev`） | 定时拉取实测快照（`7 * * * *`）与执行入口 TCP/Geo 探测（`*/5 * * * *`） | `curl -s https://nodescope-collector.github-972.workers.dev/health \| python3 -m json.tool`（`status` 应为 `"ready"`） | 带凭据运行 `npm run deploy:collector`；若 KV 无数据，检查 GitHub `results` 分支 `snapshot.json` 是否可访问 |
@@ -331,7 +331,7 @@ rm -f /tmp/nodescope-snapshot-v3.backup.json /tmp/nodescope-probes-v1.backup.jso
 
 ### 11.1 部署前端与 Pages Functions（修改 `src/`、`public/`、`functions/`、`lib/`、`scripts/generate-locales.mjs` 后执行）
 ```bash
-cd /Users/bb/codex/node/repo
+cd /Users/bb/AI-Workspace/projects/node/repo
 npm test
 npm run build
 CLOUDFLARE_EMAIL='<CLOUDFLARE_EMAIL>' \
@@ -342,7 +342,7 @@ npm run deploy:cloudflare
 
 ### 11.2 部署 Collector Worker（修改 `workers/collector.js`、`wrangler.collector.toml`、`lib/feed.js`、`lib/probe.js`、`lib/regions.js` 后执行）
 ```bash
-cd /Users/bb/codex/node/repo
+cd /Users/bb/AI-Workspace/projects/node/repo
 npm test
 CLOUDFLARE_EMAIL='<CLOUDFLARE_EMAIL>' \
 CLOUDFLARE_API_KEY='<CLOUDFLARE_API_KEY>' \
@@ -352,7 +352,7 @@ npm run deploy:collector
 
 ### 11.3 推送代码到 GitHub `main` 分支
 ```bash
-cd /Users/bb/codex/node/repo
+cd /Users/bb/AI-Workspace/projects/node/repo
 git -c credential.helper= \
   -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:<GITHUB_PAT>' | base64)" \
   push origin main
@@ -378,7 +378,7 @@ curl -s -X POST -H "X-Auth-Email: $CF_EMAIL" -H "X-Auth-Key: $CF_KEY" \
 
 ### 11.4b 回滚 Collector Worker
 ```bash
-cd /Users/bb/codex/node/repo
+cd /Users/bb/AI-Workspace/projects/node/repo
 # 查看最近版本并回滚到上一版（wrangler 内置）
 CLOUDFLARE_EMAIL='<CLOUDFLARE_EMAIL>' CLOUDFLARE_API_KEY='<CLOUDFLARE_API_KEY>' CLOUDFLARE_ACCOUNT_ID='972d4ee01963ef3bc26c44564404bf24' \
   npx wrangler deployments list --config wrangler.collector.toml
@@ -465,7 +465,7 @@ rm -f /tmp/latest-snapshot.json
 ## 14. 测试体系与真实上线验证标准
 
 ### 14.1 自动化单元测试（共 20 项）
-运行 `cd /Users/bb/codex/node/repo && npm test`（耗时约 0.1 秒）：
+运行 `cd /Users/bb/AI-Workspace/projects/node/repo && npm test`（耗时约 0.1 秒）：
 - `tests/feed.test.js`（10 项测试）：测试多协议 URI 解析、私网/脏数据过滤、Base64 订阅解码、Clash YAML 解析、规范化 `identity` 去重、API `/api/nodes` 脱敏、`/api/node` 单节点获取、`/api/subscription` 国家/地区/协议筛选、`best100` 优先级排序、`verified` 实测快照优先加载、`subscriptionTitle` 备注名生成。
 - `tests/verify.test.js`（6 项测试）：测试 `setUriLabel` 改名不破坏连接参数、16 次滚动历史拉普拉斯稳定性与评分边界、`buildVerifiedSnapshot` 出口国家采用与单出口 IP 限 8 节点、吞吐量加分、`uriToClash` 协议转换。
 - `tests/probe.test.js`（4 项测试）：测试 TCP 协议建连计时、UDP 协议跳过 TCP 探测并标记 `unsupported`、`mergeProbes` 不覆盖实测状态、缺失地理位置的域名/IP 批量重试与过期主机清理。
@@ -564,9 +564,9 @@ done
 
 | 路径 / 资源 | 来源与现状 | 是否需要清理 |
 | --- | --- | --- |
-| `/Users/bb/codex/node/HANDOFF.md` | 2026-11-04 / 2026-11-05 编写的旧版单文件交接文档（位于 Git 仓库外层目录 `/Users/bb/codex/node/`） | 已由本套 4 文件体系（`AGENTS.md`、`docs/AGENT-HANDOFF.md`、`docs/项目说明.md`、`CREDENTIALS.local.md`）全面接替；旧文件保留在 `/Users/bb/codex/node/HANDOFF.md` 仅作历史归档参考，不包含任何明文密钥 |
-| `/Users/bb/codex/node/CREDENTIALS.local.md`、`/Users/bb/codex/node/AGENTS.md`、`/Users/bb/codex/node/CHANGELOG.md`、`/Users/bb/codex/node/docs/` | 仓库外层工作区的文档副本（AI 工具会自动读取工作区根目录的 `AGENTS.md`）；凭据副本权限 `600`，不在 Git 中 | 保留；**修改仓库内文档后需同步复制到外层**（`cp repo/AGENTS.md repo/CHANGELOG.md . && cp repo/docs/*.md docs/ && cp -p repo/CREDENTIALS.local.md .`） |
-| `/Users/bb/codex/node/repo/.wrangler/` 与 `~/Library/Preferences/.wrangler/logs/` | Wrangler CLI 本地运行与部署产生的调试日志 | 已被 `.gitignore` 忽略；日志中不含 API Key 明文，无需特殊清理 |
+| `/Users/bb/AI-Workspace/projects/node/coordination/handoffs/legacy/HANDOFF.md` | 2026-11-04 / 2026-11-05 编写的旧版单文件交接文档（位于 Git 仓库外层目录 `/Users/bb/AI-Workspace/projects/node/`） | 已由本套 4 文件体系（`AGENTS.md`、`docs/AGENT-HANDOFF.md`、`docs/项目说明.md`、`CREDENTIALS.local.md`）全面接替；旧文件保留在 `/Users/bb/AI-Workspace/projects/node/coordination/handoffs/legacy/HANDOFF.md` 仅作历史归档参考，不包含任何明文密钥 |
+| `/Users/bb/AI-Workspace/projects/node/repo/CREDENTIALS.local.md`、`/Users/bb/AI-Workspace/projects/node/repo/AGENTS.md`、`/Users/bb/AI-Workspace/projects/node/repo/CHANGELOG.md`、`/Users/bb/AI-Workspace/projects/node/repo/docs/` | 仓库外层工作区的文档副本（AI 工具会自动读取工作区根目录的 `AGENTS.md`）；凭据副本权限 `600`，不在 Git 中 | 保留；**修改仓库内文档后需同步复制到外层**（`cp repo/AGENTS.md repo/CHANGELOG.md . && cp repo/docs/*.md docs/ && cp -p repo/CREDENTIALS.local.md .`） |
+| `/Users/bb/AI-Workspace/projects/node/repo/.wrangler/` 与 `~/Library/Preferences/.wrangler/logs/` | Wrangler CLI 本地运行与部署产生的调试日志 | 已被 `.gitignore` 忽略；日志中不含 API Key 明文，无需特殊清理 |
 | `/tmp/sub.out`、`/tmp/h.txt` | 2026-11-05 调试订阅接口时在 `/tmp` 生成的临时响应文件 | **已于 2026-11-18 核对时彻底删除** |
 | 测试用 DNS 记录或临时 Cloudflare Tunnel | 本项目开发过程中**未创建**任何临时隧道或测试 DNS 记录（`node.oinnn.top` 与 `node.winv.cc` 均为正式生产记录） | 无需清理 |
 
@@ -617,4 +617,4 @@ done
   - 精简索引：`/Users/bb/.gemini/antigravity/brain/9ee81bf1-4706-451d-bedd-efea3a8bd5cf/.system_generated/logs/transcript.jsonl`
   - 完整未截断记录：`/Users/bb/.gemini/antigravity/brain/9ee81bf1-4706-451d-bedd-efea3a8bd5cf/.system_generated/logs/transcript_full.jsonl`
 - **旧版交接文档（2026-11-05 归档）**：
-  - `/Users/bb/codex/node/HANDOFF.md`
+  - `/Users/bb/AI-Workspace/projects/node/coordination/handoffs/legacy/HANDOFF.md`
