@@ -1,5 +1,7 @@
 # AGENTS.md — NodeScope AI 入口指南
 
+> **2026-11-23 更新**：GitHub 仓库 gituxx/nodescope-aggregator 已按用户要求改为**私有**。私有仓库的 GitHub Actions 不再无限免费（免费额度每月 2000 分钟），而本项目测速每 2 小时一次、单次约 50 分钟，额度约 3 天耗尽，之后测速会停。正文中“公开仓库免费不限分钟”的描述已失效，处理方案待用户决定。Worker `shiying-video` 已于 2026-11-18 删除。
+
 ## AI-Workspace 入口
 
 - 项目 ID 为 `node`。先读本仓库的 [README.md](README.md)。项目背景和架构见 [项目说明](docs/项目说明.md) 与 [技术交接](docs/AGENT-HANDOFF.md)。运维命令和旧交接按当前任务范围查阅，文档中的历史本机路径按当前检出位置解释。
@@ -55,7 +57,7 @@
 1. **严禁泄露凭据**：不得将 `CREDENTIALS.local.md` 中的 API Key / PAT 写入源码、提交记录、GitHub Issue、日志或其他 markdown 文档；Git 推送时必须加 `-c credential.helper=` 防止写入系统钥匙串。
 2. **严禁触碰共用 Cloudflare 账号下的其他项目资源**（详见 `docs/AGENT-HANDOFF.md` 第 8 节）：
    - **禁止改动其他 4 个 Pages 项目**：`ouonnkitv`、`kvideo`、`tvbox-api-backup`、`book-oinnn-top`。
-   - **禁止改动其他 7 个 Workers**：`cccat-daily-checkin`、`edge-mini`、`edgetunnel`、`libretv`、`shiying-video`、`winv-nav`、`workbuddy-checkin`。
+   - **禁止改动其他 7 个 Workers**：`cccat-daily-checkin`、`edge-mini`、`edgetunnel`、`libretv`、`winv-nav`、`workbuddy-checkin`。
    - **禁止改动其他 2 个 KV 命名空间**：`edge` (`40e330af853d4e91ace657e45e3464d1`)、`edge-mini` (`e815658f4594431fb7dc88fcda918e22`)。
    - **禁止改动 `oinnn.top` 和 `winv.cc` 下除 `node.oinnn.top` / `node.winv.cc` 以外的任何 DNS 记录**（含其他项目的 CNAME/A/AAAA 及 Zoho 邮件 MX/TXT 记录）。
 3. **严禁虚假标注节点状态**：`available` 仅代表通过代理协议实测（或上游测速报告），`reachable` 仅代表 Cloudflare 到入口 IP:Port 的 TCP 建连成功；不能用 TCP 探测去测 UDP 协议（Hysteria/Hysteria2/TUIC/WireGuard），也不能让 Cloudflare 侧 TCP 失败覆盖已通过代理实测（`verifiedAt`）的结果。
