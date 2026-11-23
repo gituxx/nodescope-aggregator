@@ -1,6 +1,6 @@
 # NodeScope 技术交接手册（AGENT-HANDOFF）
 
-> **2026-11-23 更新**：GitHub 仓库 gituxx/nodescope-aggregator 已按用户要求改为**私有**。私有仓库的 GitHub Actions 不再无限免费（免费额度每月 2000 分钟），而本项目测速每 2 小时一次、单次约 50 分钟，额度约 3 天耗尽，之后测速会停。正文中“公开仓库免费不限分钟”的描述已失效，处理方案待用户决定。Worker `shiying-video` 已于 2026-11-18 删除。
+> **2026-11-23 更新**：GitHub 仓库 gituxx/nodescope-aggregator 保持**公开**（测速依赖公开仓库的免费 Actions）。Worker `shiying-video` 已于 2026-11-18 删除。
 
 > **最后核对日期**：2026-11-18（Asia/Singapore）
 > **登录与凭据**：所有账号、密码、API Key、Token 见本机 `CREDENTIALS.local.md`（权限 `600`，严禁入库或写入本文档）。
